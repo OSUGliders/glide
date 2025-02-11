@@ -1,0 +1,168 @@
+# Variable formatting follows national gdlier DAC netCDF format version 2
+# https://ioos.github.io/glider-dac/ngdac-netcdf-file-format-version-2
+
+# FLIGHT VARIABLES
+
+time: # This is the name the we want
+  # This list of sources can only be done for variables that do not appear in the same file
+  source: ["m_present_time", "sci_m_present_time"]  
+  # conversion: posix_to_datetime
+  CF: # CF attributes here
+    long_name: Time
+    standard_name: time
+    calendar: gregorian
+    units: seconds since 1970-01-01T00:00:00Z
+    axis: T
+    observation_type: "measured"
+
+lat: # This is the name that we want
+  source: m_lat  # This is the name that Slocum gliders use
+  conversion: dpm_to_dd  # Function applied to convert data units
+  CF: 
+    long_name: Latitude
+    standard_name: latitude
+    units: degrees_north
+    axis: Y
+    comment: "Estimated between surface fixes"
+    observation_type: measured
+    platform: platform
+    reference: WGS84
+    valid_max: 90.0
+    valid_min: -90.0
+    coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+
+lon:
+  source: m_lon
+  conversion: dpm_to_dd
+  CF:
+    long_name: Longitude
+    standard_name: longitude
+    units: degrees_east
+    axis: Y
+    comment: "Estimated between surface fixes"
+    observation_type: measured
+    platform: platform
+    reference: WGS84
+    valid_max: 90.0
+    valid_min: -90.0
+    coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+
+# lat_gps:
+#   source: m_gps_lat
+#   conversion: dpm_to_dd
+#   CF: 
+#     long_name: Latitude
+#     standard_name: latitude
+#     units: degrees_north
+#     axis: Y
+#     comment: "Surface fixes"
+#     observation_type: measured
+#     platform: platform
+#     reference: WGS84
+#     valid_max: 90.0
+#     valid_min: -90.0
+#     coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+
+# lon_gps:
+#   source: m_gps_lon
+#   conversion: dpm_to_dd
+#   CF:
+#     long_name: Longitude
+#     standard_name: longitude
+#     units: degrees_east
+#     axis: Y
+#     comment: "Surface fixes"
+#     observation_type: measured
+#     platform: platform
+#     reference: WGS84
+#     valid_max: 90.0
+#     valid_min: -90.0
+#     coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+
+heading:
+  source: m_heading
+  conversion: rad_to_deg
+  CF:
+    long_name: Heading
+    standard_name: platform_orientation
+    units: degrees
+    observation_type: measured
+
+pitch: 
+  source: m_pitch
+  conversion: rad_to_deg
+  CF:
+    long_name: Pitch
+    standard_name: platform_pitch_fore_up
+    units: degrees
+    observation_type: measured
+
+rol:  # Not roll because that conflicts with xarray roll method
+  source: m_roll 
+  conversion: rad_to_deg
+  CF:
+    long_name: Roll
+    standard_name: platform_roll_starboard_down
+    units: degrees
+    observation_type: measured
+
+# m_depth:
+#   name: depth
+#   CF:
+#     long_name: Depth
+#     standard_name: depth
+#     units: m
+#     valid_min: 0.0
+#     valid_max: 2000.0
+#     positive: "down"
+#     reference_datum: "sea-surface"
+#     instrument: "instrument_ctd"
+#     observation_type: "measured"
+    
+# SCIENCE VARIABLES
+
+pressure: 
+  source: sci_water_pressure
+  conversion: bar_to_dbar
+  CF: 
+    long_name: Pressure
+    standard_name: sea_water_pressure
+    units: dbar
+    valid_min: 0.0
+    valid_max: 2000.0
+    positive: "down"
+    reference_datum: "sea-surface"
+    instrument: "instrument_ctd"
+    observation_type: "measured"
+    accuracy: 1.0
+    precision: 2.0
+    resolution: 0.02
+    comment: "ctd pressure sensor"
+
+conductivity:
+  source: sci_water_cond
+  CF:
+    long_name: Conductivity
+    standard_name: sea_water_electrical_conductivity
+    units: S m-1  # Not converted to mS cm-1 becase we need S m-1 for glider DAC
+    instrument: instrument_ctd
+    valid_min: 0.
+    valid_max: 10.
+    observation_type: "measured"
+    accuracy: 0.0003
+    precision: 0.0001
+    resolution: 0.00002
+
+temperature:
+  source: sci_water_temp
+  CF:
+    long_name: Temperature
+    standard_name: sea_water_temperature
+    units: celsius
+    instrument: instrument_ctd
+    valid_min: -5.0
+    valid_max: 50.0
+    observation_type: "measured"
+    accuracy: 0.002
+    precision: 0.001
+    resolution: 0.0002

@@ -1,0 +1,34 @@
+[project]
+name = "glide"
+version = "0.1.0"
+description = "Process Slocum glider data"
+readme = "README.md"
+authors = [
+    { name = "Jesse Cusack", email = "jesse.cusack@oregonstate.edu" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "netcdf4>=1.7.2",
+    "numpy>=2.2.2",
+    "pandas>=2.2.3",
+    "pyyaml>=6.0.2",
+    "scipy>=1.15.1",
+    "typer>=0.15.1",
+    "xarray>=2025.1.2",
+]
+
+[project.scripts]
+glide = "glide.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "pandas-stubs>=2.2.3.241126",
+    "pytest>=8.3.4",
+    "ruff>=0.9.5",
+    "types-pyyaml>=6.0.12.20241230",
+]
