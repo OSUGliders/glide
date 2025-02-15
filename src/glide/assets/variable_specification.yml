@@ -97,7 +97,7 @@ pitch:
     units: degrees
     observation_type: measured
 
-rol:  # Not roll because that conflicts with xarray roll method
+roll:
   source: m_roll 
   conversion: rad_to_deg
   CF:
