@@ -38,7 +38,6 @@ def l2(
 
     out = level2.merge_l1(flt, sci)
 
-
     out.to_netcdf(out_file)
 
 

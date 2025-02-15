@@ -19,7 +19,7 @@ glide l2 osu685.sbd.nc osu684.tbd.nc --out-file=osu685.l2.nc
 
 ## Development
 
-This package has been developed with [`uv`](https://github.com/astral-sh/uv). 
+This package is developed with [`uv`](https://github.com/astral-sh/uv). 
 
 After cloning this repository, genereate the virtual environment:
 ```

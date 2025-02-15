@@ -146,8 +146,10 @@ def parse_l1(file: str | xr.Dataset, var_specs_file: str | None = None) -> xr.Da
     return ds
 
 
-def merge_l1(flt: xr.Dataset, sci: xr.Dataset, times_from: str ="science") -> xr.Dataset:
-    """Merge flight and science variables onto a common time vector. 
+def merge_l1(
+    flt: xr.Dataset, sci: xr.Dataset, times_from: str = "science"
+) -> xr.Dataset:
+    """Merge flight and science variables onto a common time vector.
     The science time vector is used by default."""
 
     if times_from == "science":
@@ -161,13 +163,16 @@ def merge_l1(flt: xr.Dataset, sci: xr.Dataset, times_from: str ="science") -> xr
 
     _log.debug("Dims of interpolant are %s", ds.sizes)
     _log.debug("Dims of dataset to interpolate are %s", ds_to_interp.sizes)
-
-    _log.debug("Interpolating onto %s time", times_from)
+    _log.debug("Interpolating onto time from %s", times_from)
 
     vars_to_interp = set(ds_to_interp.variables) - set(ds_to_interp.coords)
     for v in vars_to_interp:
         _log.debug("Iterpolating %s", v)
-        ds[v] = ("time", ds_to_interp[v].interp(time=time_interpolant).values, ds_to_interp[v].attrs)
+        ds[v] = (
+            "time",
+            ds_to_interp[v].interp(time=time_interpolant).values,
+            ds_to_interp[v].attrs,
+        )
 
     _log.debug("Dims interpolated data  %s", ds.sizes)
     _log.debug("Coords interpolated data  %s", list(ds.coords.keys()))

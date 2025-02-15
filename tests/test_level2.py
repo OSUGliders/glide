@@ -16,7 +16,10 @@ def get_test_data(sn: str = "684", ftype: str = "sbd") -> xr.Dataset:
 
 def test_promote_time():
     ds = xr.Dataset(
-        {"i": [1, 2, 3, 4], "foo": ("i", [1739052713, float("NaN"), 1739052715, 43324210293429])}
+        {
+            "i": [1, 2, 3, 4],
+            "foo": ("i", [1739052713, float("NaN"), 1739052715, 43324210293429]),
+        }
     )
     ds = l2.promote_time(ds, "foo")
     assert "foo" in ds.coords
