@@ -14,8 +14,8 @@ def get_test_data(sn: str = "684", ftype: str = "sbd") -> xr.Dataset:
     )
 
 
-def test_load_variable_specs() -> None:
-    var_specs, source_map = l2.load_variable_specs()
+def test_load_config() -> None:
+    var_specs, source_map = l2.load_config()
     assert "m_present_time" in source_map
     assert source_map["m_present_time"] == "time"
     assert var_specs["time"]["CF"]["units"] == "seconds since 1970-01-01T00:00:00Z"

@@ -3,6 +3,7 @@
 
 import logging
 
+import gsw
 import pandas as pd
 import xarray as xr
 from yaml import safe_load
@@ -13,21 +14,19 @@ from . import qc
 _log = logging.getLogger(__name__)
 
 
-def load_variable_specs(file: str | None = None) -> tuple[dict, dict]:
+def load_config(file: str | None = None) -> tuple[dict, dict]:
     """Extract variable specifications from a yaml file."""
     if file is None:
         from importlib import resources
 
-        file = str(
-            resources.files("glide").joinpath("assets/variable_specification.yml")
-        )
+        file = str(resources.files("glide").joinpath("assets/config.yml"))
 
     with open(file) as f:
-        var_specs = safe_load(f)
+        config = safe_load(f)
 
     # Generate mapping from Slocum source name to dataset name
     name_map = dict()
-    for name, specs in var_specs.items():
+    for name, specs in config.items():
         if "source" not in specs:
             continue
 
@@ -44,20 +43,20 @@ def load_variable_specs(file: str | None = None) -> tuple[dict, dict]:
 
     _log.debug("Name mapping dict % s", name_map)
 
-    return var_specs, name_map
+    return config, name_map
 
 
 def format_variables(
     ds: xr.Dataset,
-    var_specs: dict | None = None,
+    config: dict | None = None,
     name_map: dict | None = None,
-    var_specs_file: str | None = None,
+    config_file: str | None = None,
 ) -> xr.Dataset:
     """Formats time series variables following the instructions in the variable specification file.
     Drops variables that are not in the file."""
 
-    if var_specs is None or name_map is None:
-        var_specs, name_map = load_variable_specs(var_specs_file)
+    if config is None or name_map is None:
+        config, name_map = load_config(config_file)
 
     _log.debug("Formatting variables")
     reduced_name_map = {
@@ -66,7 +65,7 @@ def format_variables(
     for var, name in reduced_name_map.items():
         _log.debug("Formatting variable %s", var)
 
-        specs = var_specs[name]
+        specs = config[name]
 
         if "conversion" in specs:
             _log.debug("Converting %s using %s", var, specs["conversion"])
@@ -85,7 +84,7 @@ def format_variables(
         ds = ds.rename({var: name})
 
     # Drop variables that are not in the specs file.
-    remaining_vars = set(ds.keys()) - set(var_specs.keys())
+    remaining_vars = set(ds.keys()) - set(config.keys())
     ds = ds.drop_vars(remaining_vars)
 
     _log.debug("Variables remaining in dataset %s", list(ds.keys()))
@@ -93,9 +92,17 @@ def format_variables(
     return ds
 
 
-def parse_l1(file: str | xr.Dataset, var_specs_file: str | None = None) -> xr.Dataset:
+def parse_l1(
+    file: str | xr.Dataset,
+    config: dict | None = None,
+    name_map: dict | None = None,
+    config_file: str | None = None,
+) -> xr.Dataset:
     """Parses flight (sbd) or science (tbd) data processed by dbd2netcdf or dbd2csv.
     Applies IOOS glider DAC attributes."""
+
+    if config is None or name_map is None:
+        config, name_map = load_config(config_file)
 
     if type(file) is str:
         _log.debug("Parsing L1 %s", file)
@@ -112,13 +119,11 @@ def parse_l1(file: str | xr.Dataset, var_specs_file: str | None = None) -> xr.Da
     else:
         raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
 
-    var_specs, name_map = load_variable_specs(var_specs_file)
-
     # Apply CF conventions, rename variables
-    ds = format_variables(ds, var_specs, name_map)
+    ds = format_variables(ds, config, name_map)
 
     # Initialize QC flags
-    ds = qc.init_dataset_qc(ds, var_specs)
+    ds = qc.init_dataset_qc(ds, config)
 
     # Apply time QC
     ds = qc.time(ds)
@@ -138,7 +143,7 @@ def parse_l1(file: str | xr.Dataset, var_specs_file: str | None = None) -> xr.Da
         _log.debug("Failed to apply gps QC.")
 
     # Interpolate missing data
-    ds = qc.interpolate_missing(ds, var_specs)
+    ds = qc.interpolate_missing(ds, config)
 
     # Drop data that are all nan.
     # Must come after promote_time because we want it to ignore the time coordinate.
@@ -154,10 +159,14 @@ def merge_l1(
     flt: xr.Dataset,
     sci: xr.Dataset,
     times_from: str = "science",
-    var_specs_file: str | None = None,
+    config: dict | None = None,
+    config_file: str | None = None,
 ) -> xr.Dataset:
     """Merge flight and science variables onto a common time vector.
     The science time vector is used by default."""
+
+    if config is None:
+        config, _ = load_config(config_file)
 
     if times_from == "science":
         time_interpolant = sci.time
@@ -172,19 +181,17 @@ def merge_l1(
     _log.debug("Dims of dataset to interpolate are %s", ds_to_interp.sizes)
     _log.debug("Interpolating onto time from %s", times_from)
 
-    var_specs, _ = load_variable_specs(var_specs_file)
-
     vars_to_interp = set(ds_to_interp.variables) - set(ds_to_interp.coords)
 
     for v in vars_to_interp:
-        if "qc_" in str(v):
+        if "_qc" in str(v):
             _log.warning(
                 "Ignoring %s, merging of QC variables in not currently supported", v
             )
             continue
 
         try:  # Only drop variables if the flag is explicitly set
-            drop = var_specs[v]["drop_from_l2"]
+            drop = config[v]["drop_from_l2"]
             if drop:
                 _log.debug("Not interpolating %s due to drop_from_l2 flag in specs", v)
                 continue
@@ -201,5 +208,39 @@ def merge_l1(
     _log.debug("Dims interpolated data  %s", ds.sizes)
     _log.debug("Coords interpolated data  %s", list(ds.coords.keys()))
     _log.debug("Variables interpolated data  %s", list(ds.variables.keys()))
+
+    return ds
+
+
+def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
+    """Should be applied after merging flight and science."""
+
+    lon = ds.lon.interpolate_na("time")
+    lat = ds.lat.interpolate_na("time")
+    dims = ds.conductivity.dims
+
+    salinity = gsw.SP_from_C(ds.conductivity, ds.temperature, ds.pressure)
+    ds["salinity"] = (dims, salinity.values, config["salinity"]["CF"])
+    ds = qc.init_qc_var(ds, "salinity")
+    ds["salinity_qc"] = ds.conductivity_qc
+
+    SA = gsw.SA_from_SP(ds.salinity, ds.pressure, lon, lat)
+    ds["SA"] = (dims, SA.values, config["SA"]["CF"])
+    ds["SA_qc"] = ds.conductivity_qc
+
+    density = gsw.rho_t_exact(ds.SA, ds.temperature, ds.pressure)
+    ds["density"] = (dims, density.values, config["density"]["CF"])
+    ds = qc.init_qc_var(ds, "density")
+    ds["density_qc"] = ds.conductivity_qc
+
+    rho0 = gsw.pot_rho_t_exact(ds.SA, ds.temperature, ds.pressure, 0)
+    ds["rho0"] = (dims, rho0.values, config["rho0"]["CF"])
+    ds = qc.init_qc_var(ds, "rho0")
+    ds["rho0_qc"] = ds.conductivity_qc
+
+    CT = gsw.CT_from_t(ds.SA, ds.temperature, ds.pressure)
+    ds["CT"] = (dims, CT.values, config["CT"]["CF"])
+    ds = qc.init_qc_var(ds, "CT")
+    ds["CT_qc"] = ds.conductivity_qc
 
     return ds

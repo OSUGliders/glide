@@ -114,7 +114,7 @@ def changed_elements(x: ArrayLike, y: ArrayLike) -> tuple[NDArray, NDArray]:
 def apply_data_bounds(ds) -> xr.Dataset:
     _log.debug("Flagging out of bounds data")
     for v in ds.data_vars:
-        if "qc_" in v:
+        if "_qc" in v:
             continue
         if "valid_min" not in ds[v].attrs or "valid_max" not in ds[v].attrs:
             _log.debug("%s does not have valid_min or valid_max attribute, skipping", v)
@@ -339,7 +339,10 @@ def init_qc_var(ds: xr.Dataset, variable: str) -> xr.Dataset:
     flag = np.zeros_like(y, dtype="b")
     flag[~np.isfinite(y)] = 9
 
-    ds["qc_" + variable] = (y.dims, flag, qc_attrs)
+    qcv = variable + "_qc"
+
+    ds[qcv] = (y.dims, flag, qc_attrs)
+    ds[variable].attrs["ancillary_variables"] = qcv
 
     return ds
 
@@ -381,7 +384,7 @@ def update_qc_flag(
 
     locs = np.asarray(locs)
 
-    qcv = "qc_" + variable
+    qcv = variable + "_qc"
 
     if qcv not in ds.variables:
         return ds
