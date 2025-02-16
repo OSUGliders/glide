@@ -224,7 +224,7 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     ds = qc.init_qc_var(ds, "salinity")
     ds["salinity_qc"] = ds.conductivity_qc
 
-    SA = gsw.SA_from_SP(ds.salinit), ds.pressure, lon, lat)
+    SA = gsw.SA_from_SP(ds.salinity, ds.pressure, lon, lat)
     ds["SA"] = (dims, SA.values, config["SA"]["CF"])
     ds = qc.init_qc_var(ds, "SA")
     ds["SA_qc"] = ds.conductivity_qc
