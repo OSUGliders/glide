@@ -175,9 +175,9 @@ def merge_l1(
 
     for v in vars_to_interp:
         try:  # Only drop variables if the flag is explicitly set
-            drop = var_specs[v]["drop_from_l1"]
+            drop = var_specs[v]["drop_from_l2"]
             if drop:
-                _log.debug("Not interpolating %s due to drop_from_l1 flag in specs", v)
+                _log.debug("Not interpolating %s due to drop_from_l2 flag in specs", v)
                 continue
         except KeyError:
             pass

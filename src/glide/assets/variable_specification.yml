@@ -54,7 +54,7 @@ lon:
 m_gps_lat:
   source: m_gps_lat
   conversion: dpm_to_dd
-  drop_from_l1: True
+  drop_from_l2: True  # Not included into l2 dataset if true
   CF: 
     long_name: Latitude
     standard_name: latitude
@@ -71,7 +71,7 @@ m_gps_lat:
 m_gps_lon:
   source: m_gps_lon
   conversion: dpm_to_dd
-  drop_from_l1: True
+  drop_from_l2: True
   CF:
     long_name: Longitude
     standard_name: longitude
@@ -123,7 +123,7 @@ roll:
 
 m_depth:
   name: m_depth
-  drop_from_l1: True
+  drop_from_l2: True
   CF:
     long_name: Depth
     standard_name: depth
