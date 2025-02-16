@@ -18,6 +18,8 @@ time: # This is the name the we want
 lat: # This is the name that we want
   source: m_lat  # This is the name that Slocum gliders use
   conversion: dpm_to_dd  # Function applied to convert data units
+  interpolate_missing: True  # Interpolating nan values
+  max_gap: 600  # Max gap in seconds over which to interpolate nan values
   CF: 
     long_name: Latitude
     standard_name: latitude
@@ -34,12 +36,31 @@ lat: # This is the name that we want
 lon:
   source: m_lon
   conversion: dpm_to_dd
+  interpolate_missing: True
+  max_gap: 600
   CF:
     long_name: Longitude
     standard_name: longitude
     units: degrees_east
-    axis: Y
+    axis: X
     comment: "Estimated between surface fixes"
+    observation_type: measured
+    platform: platform
+    reference: WGS84
+    valid_max: 180.0
+    valid_min: -180.0
+    coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+
+m_gps_lat:
+  source: m_gps_lat
+  conversion: dpm_to_dd
+  drop_from_l1: True
+  CF: 
+    long_name: Latitude
+    standard_name: latitude
+    units: degrees_north
+    axis: Y
+    comment: "Surface fixes"
     observation_type: measured
     platform: platform
     reference: WGS84
@@ -47,83 +68,79 @@ lon:
     valid_min: -90.0
     coordinate_reference_frame: urn:ogc:crs:EPSG::4326
 
-# lat_gps:
-#   source: m_gps_lat
-#   conversion: dpm_to_dd
-#   CF: 
-#     long_name: Latitude
-#     standard_name: latitude
-#     units: degrees_north
-#     axis: Y
-#     comment: "Surface fixes"
-#     observation_type: measured
-#     platform: platform
-#     reference: WGS84
-#     valid_max: 90.0
-#     valid_min: -90.0
-#     coordinate_reference_frame: urn:ogc:crs:EPSG::4326
-
-# lon_gps:
-#   source: m_gps_lon
-#   conversion: dpm_to_dd
-#   CF:
-#     long_name: Longitude
-#     standard_name: longitude
-#     units: degrees_east
-#     axis: Y
-#     comment: "Surface fixes"
-#     observation_type: measured
-#     platform: platform
-#     reference: WGS84
-#     valid_max: 90.0
-#     valid_min: -90.0
-#     coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+m_gps_lon:
+  source: m_gps_lon
+  conversion: dpm_to_dd
+  drop_from_l1: True
+  CF:
+    long_name: Longitude
+    standard_name: longitude
+    units: degrees_east
+    axis: X
+    comment: "Surface fixes"
+    observation_type: measured
+    platform: platform
+    reference: WGS84
+    valid_max: 180.0
+    valid_min: -180.0
+    coordinate_reference_frame: urn:ogc:crs:EPSG::4326
 
 heading:
   source: m_heading
   conversion: rad_to_deg
+  interpolate_missing: True
   CF:
     long_name: Heading
     standard_name: platform_orientation
     units: degrees
     observation_type: measured
+    valid_max: 360.0
+    valid_min: 0.0
 
 pitch: 
   source: m_pitch
   conversion: rad_to_deg
+  interpolate_missing: True
   CF:
     long_name: Pitch
     standard_name: platform_pitch_fore_up
     units: degrees
     observation_type: measured
+    valid_max: 180.0
+    valid_min: -180.0
 
 roll:
   source: m_roll 
   conversion: rad_to_deg
+  interpolate_missing: True
   CF:
     long_name: Roll
     standard_name: platform_roll_starboard_down
     units: degrees
     observation_type: measured
+    valid_max: 180.0
+    valid_min: -180.0
 
-# m_depth:
-#   name: depth
-#   CF:
-#     long_name: Depth
-#     standard_name: depth
-#     units: m
-#     valid_min: 0.0
-#     valid_max: 2000.0
-#     positive: "down"
-#     reference_datum: "sea-surface"
-#     instrument: "instrument_ctd"
-#     observation_type: "measured"
+m_depth:
+  name: m_depth
+  drop_from_l1: True
+  CF:
+    long_name: Depth
+    standard_name: depth
+    units: m
+    valid_min: 0.0
+    valid_max: 2000.0
+    positive: "down"
+    reference_datum: "sea-surface"
+    instrument: "instrument_ctd"
+    observation_type: "measured"
     
 # SCIENCE VARIABLES
 
 pressure: 
   source: sci_water_pressure
   conversion: bar_to_dbar
+  interpolate_missing: True
   CF: 
     long_name: Pressure
     standard_name: sea_water_pressure
@@ -141,6 +158,7 @@ pressure:
 
 conductivity:
   source: sci_water_cond
+  interpolate_missing: True
   CF:
     long_name: Conductivity
     standard_name: sea_water_electrical_conductivity
@@ -155,6 +173,7 @@ conductivity:
 
 temperature:
   source: sci_water_temp
+  interpolate_missing: True
   CF:
     long_name: Temperature
     standard_name: sea_water_temperature

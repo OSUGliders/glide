@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "bottleneck>=1.4.2",
     "netcdf4>=1.7.2",
     "numpy>=2.2.2",
     "pandas>=2.2.3",
@@ -26,6 +27,8 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "ipykernel>=6.29.5",
+    "matplotlib>=3.10.0",
     "mypy>=1.15.0",
     "pandas-stubs>=2.2.3.241126",
     "pytest>=8.3.4",

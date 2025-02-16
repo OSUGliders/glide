@@ -3,12 +3,12 @@
 
 import logging
 
-import numpy as np
 import pandas as pd
 import xarray as xr
 from yaml import safe_load
 
 from . import convert as conv
+from . import qc
 
 _log = logging.getLogger(__name__)
 
@@ -47,44 +47,23 @@ def load_variable_specs(file: str | None = None) -> tuple[dict, dict]:
     return var_specs, name_map
 
 
-def promote_time(
+def format_variables(
     ds: xr.Dataset,
-    time_var: str = "time",
-    time_start: int = 946684800,
-    time_stop: int = 2208988800,
+    var_specs: dict | None = None,
+    name_map: dict | None = None,
+    var_specs_file: str | None = None,
 ) -> xr.Dataset:
-    """Apply time thresholds, remove all NaT data, reindex data with time.
-    The default thresholds are timestamps:
-    1577808000 = 2000-01-01T00:00:00
-    2208960000 = 2040-01-01T00:00:00
-    """
-    _log.debug(
-        "Removing times outside %s to %s",
-        pd.to_datetime(time_start, unit="s"),
-        pd.to_datetime(time_stop, unit="s"),
-    )
-    dim = list(ds.sizes.keys())[0]  # Assume 1D dataset
-    time = ds[time_var].values
-    time[(time < time_start) | (time > time_stop)] = np.nan
-    ds[time_var] = (dim, time)
-    good = np.isfinite(ds[time_var])
-    _log.debug(
-        "%s contains %i good points of %i total", time_var, good.sum(), good.size
-    )
-    _log.debug("Promoting %s to a dimension", time_var)
-    return ds.isel({dim: good}).swap_dims({dim: time_var})
-
-
-def format_variables(ds: xr.Dataset, var_specs_file: str | None = None) -> xr.Dataset:
-    """Formats time series variables following the instructions in the formatting file.
+    """Formats time series variables following the instructions in the variable specification file.
     Drops variables that are not in the file."""
-    _log.debug("Formatting variables")
-    var_specs, name_map = load_variable_specs(var_specs_file)
-    for var, name in name_map.items():
-        if var not in ds.variables:
-            _log.debug("Skipping %s, not in dataset", var)
-            continue
 
+    if var_specs is None or name_map is None:
+        var_specs, name_map = load_variable_specs(var_specs_file)
+
+    _log.debug("Formatting variables")
+    reduced_name_map = {
+        var: name for var, name in name_map.items() if var in ds.variables
+    }
+    for var, name in reduced_name_map.items():
         _log.debug("Formatting variable %s", var)
 
         specs = var_specs[name]
@@ -100,7 +79,7 @@ def format_variables(ds: xr.Dataset, var_specs_file: str | None = None) -> xr.Da
                 var,
                 ds[var].attrs,
             )
-            ds[var].attrs = specs["CF"]  # This wipes out existing attributes
+            ds[var].attrs = specs["CF"]  # Wipes out existing attributes
 
         _log.debug("Renaming %s to %s", var, name)
         ds = ds.rename({var: name})
@@ -133,10 +112,32 @@ def parse_l1(file: str | xr.Dataset, var_specs_file: str | None = None) -> xr.Da
     else:
         raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
 
-    ds = format_variables(ds, var_specs_file)  # Apply CF conventions, rename variables
+    var_specs, name_map = load_variable_specs(var_specs_file)
 
-    ds = promote_time(ds)  # Make time the coordinate.
+    # Apply CF conventions, rename variables
+    ds = format_variables(ds, var_specs, name_map)
 
+    # Apply time QC
+    ds = qc.time(ds)
+
+    # Make time the coordinate.
+    dim = list(ds.sizes.keys())[0]  # Assume 1D dataset
+    _log.debug("Swapping dimension %s for time", dim)
+    ds = ds.swap_dims({dim: "time"})
+
+    # Apply thresholds to all variables using valid min and max from attributes
+    ds = qc.apply_data_bounds(ds)
+
+    # Apply gps QC, will only work on flight data
+    try:
+        ds = qc.gps(ds)
+    except AttributeError:
+        _log.debug("Failed to apply gps QC.")
+
+    # Interpolate missing data
+    ds = qc.interpolate_missing(ds, var_specs)
+
+    # Drop data that are all nan.
     # Must come after promote_time because we want it to ignore the time coordinate.
     dim = list(ds.sizes.keys())[0]
     _log.debug("Before dropna, %i points along dim %s", ds.sizes[dim], dim)
@@ -147,7 +148,10 @@ def parse_l1(file: str | xr.Dataset, var_specs_file: str | None = None) -> xr.Da
 
 
 def merge_l1(
-    flt: xr.Dataset, sci: xr.Dataset, times_from: str = "science"
+    flt: xr.Dataset,
+    sci: xr.Dataset,
+    times_from: str = "science",
+    var_specs_file: str | None = None,
 ) -> xr.Dataset:
     """Merge flight and science variables onto a common time vector.
     The science time vector is used by default."""
@@ -165,12 +169,23 @@ def merge_l1(
     _log.debug("Dims of dataset to interpolate are %s", ds_to_interp.sizes)
     _log.debug("Interpolating onto time from %s", times_from)
 
+    var_specs, _ = load_variable_specs(var_specs_file)
+
     vars_to_interp = set(ds_to_interp.variables) - set(ds_to_interp.coords)
+
     for v in vars_to_interp:
+        try:  # Only drop variables if the flag is explicitly set
+            drop = var_specs[v]["drop_from_l1"]
+            if drop:
+                _log.debug("Not interpolating %s due to drop_from_l1 flag in specs", v)
+                continue
+        except KeyError:
+            pass
+
         _log.debug("Iterpolating %s", v)
         ds[v] = (
             "time",
-            ds_to_interp[v].interp(time=time_interpolant).values,
+            ds_to_interp[v].interp(time=time_interpolant, assume_sorted=True).values,
             ds_to_interp[v].attrs,
         )
 

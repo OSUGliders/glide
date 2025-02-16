@@ -14,19 +14,6 @@ def get_test_data(sn: str = "684", ftype: str = "sbd") -> xr.Dataset:
     )
 
 
-def test_promote_time():
-    ds = xr.Dataset(
-        {
-            "i": [1, 2, 3, 4],
-            "foo": ("i", [1739052713, float("NaN"), 1739052715, 43324210293429]),
-        }
-    )
-    ds = l2.promote_time(ds, "foo")
-    assert "foo" in ds.coords
-    assert ds.foo.size == 2
-    assert list(ds.foo.values) == [1739052713, 1739052715]
-
-
 def test_load_variable_specs() -> None:
     var_specs, source_map = l2.load_variable_specs()
     assert "m_present_time" in source_map

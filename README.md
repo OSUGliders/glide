@@ -7,9 +7,9 @@ This package produces quality controlled L2 and L3 datasets from real-time and d
 Our definitions of data processing levels are guided by [NASA](https://www.earthdata.nasa.gov/learn/earth-observation-data-basics/data-processing-levels) and the [Spray data](https://spraydata.ucsd.edu/data-access). 
 
 * **L0**: The binary files produced a Slocum gliders `.dbd`, `.sbd`, `.ebd`, `.tbd` or their compressed counterparts `.dcd`, ... etc. 
-* **L1**: NetCDF or csv time series of flight and science data generated using `dbd2netcdf`. Usually named `glidername.dbd.nc` and `glidername.ebd.nc` or something similar.
-* **L2**: Key science and flight variables are merged into a single time series. Basic quality control is applied. Some missing data are interpolated. Physical variables are derived. Other glider sensors (e.g. MicroRider, DVL) may also be assimilated. 
-* **L3**: Includes gridded data products. 
+* **L1**: NetCDF or csv timeseries of flight and science data generated using `dbd2netcdf`. Usually named `glidername.dbd.nc` and `glidername.ebd.nc` or something similar.
+* **L2**: Key science and flight variables are merged into a single file. Basic quality control is applied. Some missing data are interpolated. Physical variables are derived.
+* **L3**: Includes gridded data products.
 
 ## Usage
 
@@ -46,3 +46,5 @@ Try out glide on the test data:
 ```
 uv run glide --log-level=debug l2 tests/data/osu684.sbd.csv tests/data/osu684.tbd.csv
 ```
+
+By default this will produce a file `slocum.l2.nc`. 
