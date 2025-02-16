@@ -219,12 +219,12 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     lat = ds.lat.interpolate_na("time")
     dims = ds.conductivity.dims
 
-    salinity = gsw.SP_from_C(ds.conductivity, ds.temperature, ds.pressure)
+    salinity = gsw.SP_from_C(conv.spm_to_mspcm(ds.conductivity), ds.temperature, ds.pressure)
     ds["salinity"] = (dims, salinity.values, config["salinity"]["CF"])
     ds = qc.init_qc_var(ds, "salinity")
     ds["salinity_qc"] = ds.conductivity_qc
 
-    SA = gsw.SA_from_SP(conv.spm_to_mspcm(ds.salinity), ds.pressure, lon, lat)
+    SA = gsw.SA_from_SP(ds.salinit), ds.pressure, lon, lat)
     ds["SA"] = (dims, SA.values, config["SA"]["CF"])
     ds = qc.init_qc_var(ds, "SA")
     ds["SA_qc"] = ds.conductivity_qc
