@@ -257,8 +257,8 @@ def gps(
         t = time[in_gap]
 
         good = np.isfinite(lo) & np.isfinite(la)
-        if ~good.any():  # Skip empty gaps
-            _log.debug("No dead reckoned positions to adjust in gap %i", i)
+        if good.sum() < 2:  # Skip empty gaps
+            _log.debug("Less than 2 positions to adjust in gap %i", i)
             continue
 
         _log.debug("Adjusting %i positions in gap %i", good.sum(), i)
