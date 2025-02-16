@@ -117,6 +117,9 @@ def parse_l1(file: str | xr.Dataset, var_specs_file: str | None = None) -> xr.Da
     # Apply CF conventions, rename variables
     ds = format_variables(ds, var_specs, name_map)
 
+    # Initialize QC flags
+    ds = qc.init_dataset_qc(ds, var_specs)
+
     # Apply time QC
     ds = qc.time(ds)
 
@@ -174,6 +177,10 @@ def merge_l1(
     vars_to_interp = set(ds_to_interp.variables) - set(ds_to_interp.coords)
 
     for v in vars_to_interp:
+        if "qc_" in str(v):
+            _log.warning("Ignoring %s, merging of QC variables in not currently supported", v)
+            continue
+
         try:  # Only drop variables if the flag is explicitly set
             drop = var_specs[v]["drop_from_l2"]
             if drop:

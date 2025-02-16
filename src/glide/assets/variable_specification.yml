@@ -5,7 +5,8 @@
 
 time: # This is the name the we want
   # This list of sources can only be done for variables that do not appear in the same file
-  source: ["m_present_time", "sci_m_present_time"]  
+  source: ["m_present_time", "sci_m_present_time"]
+  track_qc: True
   # conversion: posix_to_datetime
   CF: # CF attributes here
     long_name: Time
@@ -20,6 +21,7 @@ lat: # This is the name that we want
   conversion: dpm_to_dd  # Function applied to convert data units
   interpolate_missing: True  # Interpolating nan values
   max_gap: 600  # Max gap in seconds over which to interpolate nan values
+  track_qc: True  # Whether to keep track of quality control
   CF: 
     long_name: Latitude
     standard_name: latitude
@@ -38,6 +40,7 @@ lon:
   conversion: dpm_to_dd
   interpolate_missing: True
   max_gap: 600
+  track_qc: True
   CF:
     long_name: Longitude
     standard_name: longitude
@@ -141,6 +144,7 @@ pressure:
   source: sci_water_pressure
   conversion: bar_to_dbar
   interpolate_missing: True
+  track_qc: True
   CF: 
     long_name: Pressure
     standard_name: sea_water_pressure
@@ -159,6 +163,7 @@ pressure:
 conductivity:
   source: sci_water_cond
   interpolate_missing: True
+  track_qc: True
   CF:
     long_name: Conductivity
     standard_name: sea_water_electrical_conductivity
@@ -174,6 +179,7 @@ conductivity:
 temperature:
   source: sci_water_temp
   interpolate_missing: True
+  track_qc: True
   CF:
     long_name: Temperature
     standard_name: sea_water_temperature

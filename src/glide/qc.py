@@ -49,9 +49,8 @@ def extract_surface_gps_groups(
     dt: Gap finding threshold, seconds
 
     Returns
-    idx_good: indexes of good surface fixes
     idx_bound: bounding indexes of groups of good surface fixes in original data
-    idx_bound_good: bounding indexes of groups of good surface fixes after reducing original data to good points only
+    idx_good_updated: indexes of good surface fixes
     """
     time = np.asarray(time)
     lon = np.asarray(lon)
@@ -98,9 +97,19 @@ def extract_surface_gps_groups(
     return idx_bound, idx_good_updated
 
 
+def changed_elements(x: ArrayLike, y: ArrayLike) -> tuple[NDArray, NDArray]:
+    x, y = np.asarray(x), np.asarray(y)
+    unchanged = np.isclose(x, y)
+    both_nan = np.isnan(x) & np.isnan(y)
+    changed = np.logical_not(unchanged | both_nan)
+    return changed, unchanged
+
+
 def apply_data_bounds(ds) -> xr.Dataset:
     _log.debug("Flagging out of bounds data")
     for v in ds.data_vars:
+        if "qc_" in v:
+            continue
         if "valid_min" not in ds[v].attrs or "valid_max" not in ds[v].attrs:
             _log.debug("%s does not have valid_min or valid_max attribute, skipping", v)
             continue
@@ -115,7 +124,15 @@ def apply_data_bounds(ds) -> xr.Dataset:
             vmax,
         )
 
+        original = ds[v].values.copy()
+
         ds[v] = (ds[v].dims, nan_out_of_bounds(ds[v], vmin, vmax), ds[v].attrs)
+        
+        # Update QC
+        changed, unchanged = changed_elements(original, ds[v])
+        _log.debug("%i elements changed of %i total", changed.sum(), changed.size)
+        ds = update_qc_flag(ds, v, 4, changed)  # Outside bounds is bad
+        ds = update_qc_flag(ds, v, 2, unchanged)  # Within is probably good
 
     return ds
 
@@ -123,16 +140,27 @@ def apply_data_bounds(ds) -> xr.Dataset:
 def interpolate_missing(ds: xr.Dataset, var_specs: dict) -> xr.Dataset:
     _log.debug("Interpolating missing data")
     for v in ds.data_vars:
+        if v not in var_specs:
+            continue
+
         specs = var_specs[v]
         if "interpolate_missing" not in specs:
             continue
+        if not specs["interpolate_missing"]:
+            continue
 
-        if specs["interpolate_missing"]:
-            max_gap = specs["max_gap"] if "max_gap" in specs else 60
+        max_gap = specs["max_gap"] if "max_gap" in specs else 60
 
-            _log.debug("Interpolating %s with max gap %s", v, max_gap)
+        _log.debug("Interpolating %s with max gap %s", v, max_gap)
 
-            ds[v] = ds[v].interpolate_na(dim="time", max_gap=max_gap)
+        original = ds[v].values.copy()
+
+        ds[v] = ds[v].interpolate_na(dim="time", max_gap=max_gap)
+
+        # Update QC
+        changed, _ = changed_elements(original, ds[v])
+        _log.debug("%i elements changed of %i total", changed.sum(), changed.size)
+        ds = update_qc_flag(ds, str(v), 9, changed)
 
     return ds
 
@@ -178,6 +206,9 @@ def time(
     )
     ds = ds.isel({dim: idx})
 
+    # After this we are pretty confident in the times
+    ds = update_qc_flag(ds, time_var, 2, np.full(ds[time_var].shape, True))
+
     return ds
 
 
@@ -206,6 +237,8 @@ def gps(
     lon = ds.lon.values
     lat = ds.lat.values
 
+    idx_changed = []  # Track changed points for QC
+
     for i in range(n_gaps):
         # Gaps are between surface fix groups
         in_gap = slice(idx_bound[i, 1], idx_bound[i + 1, 0])
@@ -220,6 +253,7 @@ def gps(
             continue
 
         idx_good = np.argwhere(good).flatten()
+        idx_changed.append(idx_good + in_gap.start)
 
         # Adjustments to dead reckoning
         m_gps, c_gps = fit_line(
@@ -249,9 +283,17 @@ def gps(
         lon[in_gap] = lo + dlo
         lat[in_gap] = la + dla
 
+    changed = np.full(lon.shape, False)
+    changed[np.hstack(idx_changed)] = True
+
     ds["lon"] = (ds.lon.dims, lon, ds.lon.attrs)
     ds["lat"] = (ds.lat.dims, lat, ds.lat.attrs)
 
+    # QC update
+    ds = update_qc_flag(ds, "lon", 2, changed)
+    ds = update_qc_flag(ds, "lat", 2, changed)
+
+    # Finally, remove m_gps data that were flagged bad.
     m_gps_lon = np.full_like(gps_lon, np.nan)
     m_gps_lon[idx_good_gps] = gps_lon[idx_good_gps]
     ds["m_gps_lon"] = (ds.m_gps_lon.dims, m_gps_lon, ds.m_gps_lon.attrs)
@@ -259,5 +301,80 @@ def gps(
     m_gps_lat = np.full_like(gps_lat, np.nan)
     m_gps_lat[idx_good_gps] = gps_lat[idx_good_gps]
     ds["m_gps_lat"] = (ds.m_gps_lat.dims, m_gps_lat, ds.m_gps_lat.attrs)
+
+    return ds
+
+
+def init_qc_var(ds: xr.Dataset, variable: str) -> xr.Dataset:
+
+    _log.debug("Initialising qc flags for %s", variable)
+
+    y = ds[variable]
+
+    qc_attrs = {
+        "flag_meanings": 'no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed not_used not_used interpolated_value missing_value',
+        "flag_values": np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], dtype="b"),
+        "long_name": f"{y.attrs['long_name']} Quality Flag",
+        "standard_name": f"{y.attrs['standard_name']} status_flag",
+        "valid_max": np.int8(9),
+        "valid_min": np.int8(0),
+    }
+
+    flag = np.zeros_like(y, dtype="b")
+    flag[~np.isfinite(y)] = 9
+
+    ds["qc_" + variable] = (y.dims, flag, qc_attrs)
+
+    return ds
+
+
+def init_dataset_qc(ds: xr.Dataset, var_specs: dict) -> xr.Dataset:
+
+    _log.debug("Initialising all qc flags")
+
+    for v in ds.variables:
+        if v not in var_specs:
+            continue
+
+        specs = var_specs[v]
+        if "track_qc" not in specs:
+            continue
+        if not specs["track_qc"]:
+            continue
+        
+        ds = init_qc_var(ds, str(v))
+
+    return ds
+
+
+def update_qc_flag(ds: xr.Dataset, variable: str, flag_value: int, locs: ArrayLike) -> xr.Dataset:
+    """
+    flag_values
+    0: no_qc_performed
+    1: good_data 
+    2: probably_good_data 
+    3: bad_data_that_are_potentially_correctable 
+    4: bad_data 
+    5: value_changed 
+    6: not_used 
+    7: not_used 
+    8: interpolated_value 
+    9: missing_value
+    """
+
+    locs = np.asarray(locs)
+
+    qcv = "qc_" + variable
+
+    if qcv not in ds.variables:
+        return ds
+
+    if np.logical_not(locs).all():
+        return ds
+
+    flag = ds[qcv].values
+    flag[locs] = np.int8(flag_value)
+
+    ds[qcv] = (ds[qcv].dims, flag, ds[qcv].attrs)
 
     return ds
