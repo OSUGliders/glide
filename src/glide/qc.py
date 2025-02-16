@@ -3,10 +3,9 @@
 import logging
 
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
 import pandas as pd
 import xarray as xr
-
+from numpy.typing import ArrayLike, NDArray
 
 _log = logging.getLogger(__name__)
 
@@ -64,24 +63,31 @@ def extract_surface_gps_groups(
 
     d[~np.isfinite(d)] = 0
     d_med = np.median(d)
+    _log.debug("Median depth %.2f", d_med)
 
     if dt is None:
         # The default gap finding threshold
         dt = 3 * np.median(np.diff(t))
 
+    _log.debug("Gap finding threshold %.2f", dt)
+
     # Indexes bounding closely spaced fixes
     idx_bound_good = closely_spaced(t, dt)
 
     fix_count = idx_bound_good[:, 1] - idx_bound_good[:, 0]
+    _log.debug("Found %i groups of fixes", fix_count.size)
+    _log.debug("Count of fixes in groups is %s", fix_count)
 
     # QC: Remove first fix after long gap
     # TODO: The first fix in the last grouping should not be removed if we follow the IOOS manual
     idx_after_gap = (
         idx_bound_good[:, 0] if fix_count[-1] > 2 else idx_bound_good[:-1, 0]
     )
+    _log.debug("%i indexes after gaps to remove", idx_after_gap.size)
 
     # QC: Remove deep fixes
     idx_depth_bad = np.argwhere(d > d_med + 0.5).flatten()
+    _log.debug("%i deep fixes to remove", idx_depth_bad.size)
 
     # Update good flag
     idx_set_bad = np.hstack((idx_after_gap, idx_depth_bad))
@@ -127,7 +133,7 @@ def apply_data_bounds(ds) -> xr.Dataset:
         original = ds[v].values.copy()
 
         ds[v] = (ds[v].dims, nan_out_of_bounds(ds[v], vmin, vmax), ds[v].attrs)
-        
+
         # Update QC
         changed, unchanged = changed_elements(original, ds[v])
         _log.debug("%i elements changed of %i total", changed.sum(), changed.size)
@@ -224,6 +230,7 @@ def gps(
     """
 
     # Adjust dead reckoning
+    _log.debug("Adjusting dead reckoning")
     time = ds.time.values
     gps_lon = ds.m_gps_lon.values
     gps_lat = ds.m_gps_lat.values
@@ -233,6 +240,7 @@ def gps(
         time, gps_lon, gps_lat, depth, dt
     )
     n_gaps = idx_bound.shape[0] - 1
+    _log.debug("Found %i gaps between surface fixes", n_gaps)
 
     lon = ds.lon.values
     lat = ds.lat.values
@@ -250,10 +258,13 @@ def gps(
 
         good = np.isfinite(lo) & np.isfinite(la)
         if ~good.any():  # Skip empty gaps
+            _log.debug("No dead reckoned positions to adjust in gap %i", i)
             continue
 
+        _log.debug("Adjusting %i positions in gap %i", good.sum(), i)
+
         idx_good = np.argwhere(good).flatten()
-        idx_changed.append(idx_good + in_gap.start)
+        idx_changed.append(idx_good.copy() + in_gap.start)
 
         # Adjustments to dead reckoning
         m_gps, c_gps = fit_line(
@@ -266,7 +277,10 @@ def gps(
             t[idx_good[0]], lo[idx_good[0]], t[idx_good[-1]], lo[idx_good[-1]]
         )
 
-        dlo = (m_gps - m_dr) * t + (c_gps - c_dr)
+        dmlo, dclo = (m_gps - m_dr), (c_gps - c_dr)
+        dlo = dmlo * t + dclo
+
+        _log.debug("lon slope diff: %.2e, intercept: %.2e, in gap %i", dmlo, dclo, i)
 
         m_gps, c_gps = fit_line(
             time[in_gap.start],
@@ -278,7 +292,10 @@ def gps(
             t[idx_good[0]], la[idx_good[0]], t[idx_good[-1]], la[idx_good[-1]]
         )
 
-        dla = (m_gps - m_dr) * t + (c_gps - c_dr)
+        dmla, dcla = (m_gps - m_dr), (c_gps - c_dr)
+        dla = dmla * t + dcla
+
+        _log.debug("lat slope diff: %.2e, intercept: %.2e, in gap %i", dmla, dcla, i)
 
         lon[in_gap] = lo + dlo
         lat[in_gap] = la + dla
@@ -306,13 +323,12 @@ def gps(
 
 
 def init_qc_var(ds: xr.Dataset, variable: str) -> xr.Dataset:
-
     _log.debug("Initialising qc flags for %s", variable)
 
     y = ds[variable]
 
     qc_attrs = {
-        "flag_meanings": 'no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed not_used not_used interpolated_value missing_value',
+        "flag_meanings": "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed not_used not_used interpolated_value missing_value",
         "flag_values": np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], dtype="b"),
         "long_name": f"{y.attrs['long_name']} Quality Flag",
         "standard_name": f"{y.attrs['standard_name']} status_flag",
@@ -329,7 +345,6 @@ def init_qc_var(ds: xr.Dataset, variable: str) -> xr.Dataset:
 
 
 def init_dataset_qc(ds: xr.Dataset, var_specs: dict) -> xr.Dataset:
-
     _log.debug("Initialising all qc flags")
 
     for v in ds.variables:
@@ -341,24 +356,26 @@ def init_dataset_qc(ds: xr.Dataset, var_specs: dict) -> xr.Dataset:
             continue
         if not specs["track_qc"]:
             continue
-        
+
         ds = init_qc_var(ds, str(v))
 
     return ds
 
 
-def update_qc_flag(ds: xr.Dataset, variable: str, flag_value: int, locs: ArrayLike) -> xr.Dataset:
+def update_qc_flag(
+    ds: xr.Dataset, variable: str, flag_value: int, locs: ArrayLike
+) -> xr.Dataset:
     """
     flag_values
     0: no_qc_performed
-    1: good_data 
-    2: probably_good_data 
-    3: bad_data_that_are_potentially_correctable 
-    4: bad_data 
-    5: value_changed 
-    6: not_used 
-    7: not_used 
-    8: interpolated_value 
+    1: good_data
+    2: probably_good_data
+    3: bad_data_that_are_potentially_correctable
+    4: bad_data
+    5: value_changed
+    6: not_used
+    7: not_used
+    8: interpolated_value
     9: missing_value
     """
 

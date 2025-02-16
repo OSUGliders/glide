@@ -169,7 +169,7 @@ conductivity:
     standard_name: sea_water_electrical_conductivity
     units: S m-1  # Not converted to mS cm-1 becase we need S m-1 for glider DAC
     instrument: instrument_ctd
-    valid_min: 0.
+    valid_min: 0.1
     valid_max: 10.
     observation_type: "measured"
     accuracy: 0.0003

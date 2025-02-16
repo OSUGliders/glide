@@ -178,7 +178,9 @@ def merge_l1(
 
     for v in vars_to_interp:
         if "qc_" in str(v):
-            _log.warning("Ignoring %s, merging of QC variables in not currently supported", v)
+            _log.warning(
+                "Ignoring %s, merging of QC variables in not currently supported", v
+            )
             continue
 
         try:  # Only drop variables if the flag is explicitly set
