@@ -243,6 +243,13 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     ds = qc.init_qc(ds, config, variables, ds.conductivity_qc.values)
     ds = qc.apply_bounds(ds, variables)
 
+    z = gsw.z_from_p(ds.pressure, lat)
+    ds["z"] = (dims, z.values, config["z"]["CF"])
+    ds["depth"] = (dims, -z.values, config["depth"]["CF"])
+
+    variables = ["z", "depth"]
+    ds = qc.init_qc(ds, config, variables, ds.pressure_qc.values)
+
     N2, _ = gsw.Nsquared(ds.SA, ds.CT, ds.pressure, ds.lat)
     # Try interpolating N2 back onto positions of data.
     # This does have the effect of low-pass filtering.
@@ -253,7 +260,7 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     return ds
 
 
-def get_profiles(ds: xr.Dataset):
+def get_profiles(ds: xr.Dataset) -> xr.Dataset:
     dive_id, climb_id, state = pfls.find_profiles_using_logic(ds.pressure)
     ds["dive_id"] = ("time", dive_id, dict(_FillValue=-1))
     ds["climb_id"] = ("time", climb_id, dict(_FillValue=-1))
@@ -262,7 +269,7 @@ def get_profiles(ds: xr.Dataset):
         state.astype("b"),
         dict(
             flag_values=np.array([-1, 0, 1, 2], "b"),
-            flag_meanings="state_uknown surface diving climbing",
+            flag_meanings="state_unknown surfaced diving climbing",
             valid_max=np.int8(3),
             valid_min=np.int8(-1),
         ),

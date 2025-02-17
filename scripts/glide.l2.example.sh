@@ -1,0 +1,1 @@
+glide --log-level=debug l2 ../tests/data/osu684.sbd.csv ../tests/data/osu684.tbd.csv ../tests/data/osu684.l2.nc

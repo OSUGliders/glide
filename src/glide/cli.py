@@ -5,11 +5,11 @@ import logging
 import typer
 from typing_extensions import Annotated
 
-from . import level2
+from . import level2, level3
 
 _log = logging.getLogger(__name__)
 
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_enable=False)
 
 
 @app.callback()
@@ -48,5 +48,19 @@ def l2(
 
 
 @app.command()
-def l3():
+def l3(
+    l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
+    out_file: Annotated[str, typer.Argument(help="The output file.")] = "slocum.l3.nc",
+    bin_size: Annotated[float, typer.Argument(help="Depth bin size in meters.")] = 10.0,
+) -> None:
+    _log.debug("L2 file %s", l2_file)
+    _log.debug("Output file %s", out_file)
+    _log.debug("Bin size %s", bin_size)
+
+    l2 = level3.parse_l2(l2_file)
+
+    out = level3.bin_l2(l2, bin_size)
+
+    out.to_netcdf(out_file)
+
     return None
