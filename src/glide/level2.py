@@ -84,6 +84,13 @@ def format_variables(
     return ds
 
 
+def fix_time_varaiable_conflict(ds: xr.Dataset) -> xr.Dataset:
+    if "m_present_time" in ds.variables and "sci_m_present_time" in ds.variables:
+        return ds.drop("sci_m_present_time")
+    else:
+        return ds
+
+
 def parse_l1(
     file: str | xr.Dataset,
     config: dict | None = None,
@@ -109,6 +116,9 @@ def parse_l1(
         ds = file
     else:
         raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
+    
+    # Check for name conflicts
+    ds = fix_time_varaiable_conflict(ds)
 
     # Apply CF conventions, rename variables
     ds = format_variables(ds, config, name_map)
