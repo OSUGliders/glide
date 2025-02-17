@@ -4,11 +4,13 @@
 import logging
 
 import gsw
+import numpy as np
 import pandas as pd
 import xarray as xr
 from yaml import safe_load
 
 from . import convert as conv
+from . import profiles as pfls
 from . import qc
 
 _log = logging.getLogger(__name__)
@@ -248,4 +250,21 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     ds["N2"] = (dims, N2.interp(time=ds.time).values, config["N2"]["CF"])
     ds = qc.init_qc_variable(ds, "N2")
 
+    return ds
+
+
+def get_profiles(ds: xr.Dataset):
+    dive_id, climb_id, state = pfls.find_profiles_using_logic(ds.pressure)
+    ds["dive_id"] = ("time", dive_id, dict(_FillValue=-1))
+    ds["climb_id"] = ("time", climb_id, dict(_FillValue=-1))
+    ds["state"] = (
+        "time",
+        state.astype("b"),
+        dict(
+            flag_values=np.array([-1, 0, 1, 2], "b"),
+            flag_meanings="state_uknown surface diving climbing",
+            valid_max=np.int8(3),
+            valid_min=np.int8(-1),
+        ),
+    )
     return ds

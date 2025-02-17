@@ -39,7 +39,10 @@ def l2(
     sci = level2.parse_l1(sci_file, config, name_map)
 
     out = level2.merge_l1(flt, sci, "science", config)
+
     out = level2.calculate_thermodynamics(out, config)
+
+    out = level2.get_profiles(out)
 
     out.to_netcdf(out_file)
 
