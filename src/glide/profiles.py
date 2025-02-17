@@ -42,7 +42,7 @@ def contiguous_regions(condition: ArrayLike) -> NDArray:
 def find_profiles_using_logic(
     p: ArrayLike,
     p_near_surface: float = 1.0,
-    dp_threshold: float = 3.0,
+    dp_threshold: float = 5.0,
     dp_dive_reject: float = 10,
 ) -> tuple[NDArray, NDArray, NDArray]:
     """The number of if statements is a little overwhelming, but this works, sometimes.
