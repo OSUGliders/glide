@@ -47,145 +47,120 @@ def find_profiles_using_logic(
 ) -> tuple[NDArray, NDArray, NDArray]:
     """The number of if statements is a little overwhelming, but this works, sometimes.
 
-    Rejects dives / climbes that don't start or end in a surfacing if they are too short using the
+    Rejects dives / climbs that don't start or end in a surfacing if they are too short using the
     dp_dive_reject parameter.
-
     """
 
     p = np.asarray(p)
-
     _log.debug("Finding profiles in array of size %i", p.size)
 
     # States
-    unknown = -1
-    surface = 0
-    diving = 1
-    climbing = 2
-    state = np.full_like(p, 0, dtype=int)
-    dive_ids = np.full_like(p, -1, dtype=int)
-    climb_ids = np.full_like(p, -1, dtype=int)
+    UNKNOWN, SURFACE, DIVING, CLIMBING = -1, 0, 1, 2
+    state = np.full_like(p, SURFACE, dtype=int)
+    dive_ids = np.full_like(p, UNKNOWN, dtype=int)
+    climb_ids = np.full_like(p, UNKNOWN, dtype=int)
 
-    dive_id = 0
-    climb_id = 0
-    idx_dive_start = 0
-    idx_dive_end = 0
-    dp_latest = 0.0  # Pressure difference between last good measurements
+    dive_id, climb_id = 0, 0
+    idx_dive_start, idx_dive_end = 0, 0
+    dp_latest = 0.0
+
+    def update_state(i, i1, p0, p1):
+        nonlocal dp_latest
+        if np.isfinite(p1) and np.isfinite(p0):
+            dp_latest = np.abs(p1 - p0)
+
+        if np.isnan(p1) and p0 < p_near_surface:
+            return SURFACE
+        if np.isnan(p1) and np.isnan(p0) and state[i] == SURFACE:
+            return SURFACE
+        if np.isnan(p1) and p0 < dp_threshold * dp_latest:
+            return SURFACE
+        if np.isnan(p1) and p0 > p_near_surface:
+            return state[i]
+        if np.isnan(p0) and p1 > p_near_surface:
+            return state[i]
+        if p1 < p_near_surface:
+            return SURFACE
+        if p1 > p0:
+            return DIVING
+        if p1 < p0:
+            return CLIMBING
+        if p1 > 0 and np.isnan(p0) and state[i] == SURFACE:
+            return DIVING
+        if np.isclose(p0, p1):
+            return state[i]
+        raise RuntimeError(
+            f"Cannot determine state at i = {i}, p0 = {p0}, p1 = {p1}, state0 = {state[i]}, state1 = {state[i1]}"
+        )
+
+    def handle_mini_profiles(profile_type, state_value, reject_condition):
+        regions = contiguous_regions(state == state_value)
+        p_end = p[regions[:, 1] - 1]
+        p_start = p[regions[:, 0] - 1]
+        dp = p_end - p_start
+        remove = reject_condition(dp, p_start)
+
+        _log.debug("Removing %i mini-%s", remove.sum(), profile_type)
+
+        for j in np.argwhere(remove).flatten():
+            segment = slice(regions[j, 0], regions[j, 1])
+            state[segment] = CLIMBING if state_value == DIVING else DIVING
+            if state_value == DIVING:
+                climb_ids[segment] = climb_ids[regions[j, 0] - 1]
+                dive_ids[segment] = UNKNOWN
+            else:
+                dive_ids[segment] = dive_ids[regions[j, 0] - 1]
+                climb_ids[segment] = UNKNOWN
+            dive_ids[regions[j, 0] :] -= 1
+            climb_ids[regions[j, 1] :] -= 1
 
     # Determine initial state
-    # Could have more logic here...
-    if np.isclose(p[0], 0):
-        state[0] = surface
-    else:
-        state[0] = unknown
+    state[0] = SURFACE if np.isclose(p[0], 0) else UNKNOWN
 
     # Loop over pressure values
     for i in range(p.size - 1):
         i1 = i + 1
         p0, p1 = p[i], p[i1]
+        state[i1] = update_state(i, i1, p0, p1)
 
-        if np.isfinite(p1) and np.isfinite(p0):
-            dp_latest = np.abs(p1 - p0)
-
-        ## State logic ##
-        # If NaN, what are our options?
-        # Assume at the surface if the last p value was 0
-        if np.isnan(p1) & (p0 < p_near_surface):
-            state[i1] = surface
-        elif np.isnan(p1) & np.isnan(p0) & (state[i] == surface):
-            state[i1] = surface
-        # If climbing and close to the surface and run into NaN, assume surface
-        elif np.isnan(p1) & (p0 < dp_threshold * dp_latest):
-            state[i1] = surface
-        # Assume still doing what it was doing before, if the last p value > 0
-        elif np.isnan(p1) & (p0 > p_near_surface):
-            state[i1] = state[i]
-        elif np.isnan(p0) & (p1 > p_near_surface):
-            state[i1] = state[i]
-        # If p1 not NaN, what are our options?
-        elif p1 < p_near_surface:
-            state[i1] = surface
-        elif p1 > p0:
-            state[i1] = diving
-        elif p1 < p0:
-            state[i1] = climbing
-        # If p increases and the last p value was NaN and the last state was surface, assume now diving
-        elif (p1 > 0) & np.isnan(p0) & (state[i] == surface):
-            state[i1] = diving
-            # Update previous state if it has a value
-        # Consecutive values within machine precision... something odd, but assume we're doing what we were before
-        elif np.isclose(p0, p1):
-            state[i1] = state[i]
-        else:
-            raise RuntimeError(
-                f"Cannot determine state at i = {i}, p0 = {p0}, p1 = {p1}, state0 = {state[i]}, state1 = {state[i1]}"
-            )
-
-        ## Counters ##
-        if (state[i1] == diving) & (state[i] != diving):
+        if state[i1] == DIVING and state[i] != DIVING:
             dive_id += 1
-            idx_dive_start = i1
-            idx_dive_end = i1
-        if (state[i1] == climbing) & (state[i] != climbing):
+            idx_dive_start, idx_dive_end = i1, i1
+        if state[i1] == CLIMBING and state[i] != CLIMBING:
             climb_id += 1
             if climb_id != dive_id:
                 raise RuntimeError(
                     "Climb number doesn't match most recent dive number."
                 )
 
-        if state[i1] == diving:
+        if state[i1] == DIVING:
             dive_ids[i1] = dive_id
             idx_dive_end = i1
-        if state[i1] == climbing:
+        if state[i1] == CLIMBING:
             climb_ids[i1] = climb_id
 
-        ## Counter logic ##
-        # If we got to the surface after a dive, there is some problem
-        if (state[i1] == surface) and (state[i] == diving):
+        if state[i1] == SURFACE and state[i] == DIVING:
             _log.warning(
-                "Arrived at surface from dive, there could be an issue at index % i", i1
+                "Arrived at surface from dive, there could be an issue at index %i", i1
             )
-            state[idx_dive_start : idx_dive_end + 1] = unknown
-            dive_ids[idx_dive_start : idx_dive_end + 1] = unknown
+            state[idx_dive_start : idx_dive_end + 1] = UNKNOWN
+            dive_ids[idx_dive_start : idx_dive_end + 1] = UNKNOWN
             dive_id -= 1
 
     _log.debug("Found %i dives and %i climbs", dive_id, climb_id)
 
-    # Check for mini-dives
-    id = contiguous_regions(state == 1)
-    p_end = p[id[:, 1] - 1]
-    p_start = p[id[:, 0] - 1]
-    dp = p_end - p_start
-    remove = (dp < dp_dive_reject) & (p_start > p_near_surface)
+    handle_mini_profiles(
+        "dives",
+        DIVING,
+        lambda dp, p_start: (dp < dp_dive_reject) & (p_start > p_near_surface),
+    )
+    handle_mini_profiles(
+        "climbs",
+        CLIMBING,
+        lambda dp, p_start: (dp > -dp_dive_reject) & (p_start > p_near_surface),
+    )
 
-    _log.debug("Removing %i mini-dives", remove.sum())
-
-    for j in np.argwhere(remove).flatten():
-        in_dive_segment = slice(id[j, 0], id[j, 1])
-        state[in_dive_segment] = 2
-        climb_ids[in_dive_segment] = climb_ids[id[j, 0] - 1]
-        dive_ids[in_dive_segment] = -1
-        dive_ids[id[j, 0] :] -= 1
-        climb_ids[id[j, 1] :] -= 1
-
-    # Check for mini-climbs
-    ic = contiguous_regions(state == 2)
-
-    p_end = p[ic[:, 1] - 1]
-    p_start = p[ic[:, 0] - 1]
-    dp = p_end - p_start
-    remove = (dp > -dp_dive_reject) & (p_start > p_near_surface)
-
-    _log.debug("Removing %i mini-climbs", remove.sum())
-
-    for j in np.argwhere(remove).flatten():
-        in_climb_segment = slice(ic[j, 0], ic[j, 1])
-        state[in_climb_segment] = 1
-        climb_ids[in_climb_segment] = -1
-        dive_ids[in_climb_segment] = dive_ids[ic[j, 0] - 1]
-        dive_ids[ic[j, 1] :] -= 1
-        climb_ids[ic[j, 0] :] -= 1
-
-    dive_ids[dive_ids < 1] = -1
-    climb_ids[climb_ids < 1] = -1
+    dive_ids[dive_ids < 1] = UNKNOWN
+    climb_ids[climb_ids < 1] = UNKNOWN
 
     return dive_ids, climb_ids, state
