@@ -20,18 +20,47 @@ def main(log_level: str = "WARN"):
 
 
 @app.command()
+def l1b(
+    file: Annotated[str, typer.Argument(help="The sbd/tbd/dbd/ebd data file.")],
+    out_file: Annotated[str, typer.Option(help="The output file.")] = "slocum.l1b.nc",
+    config_file: Annotated[
+        str | None,
+        typer.Option(help="Processed variables are specified in this YAML file."),
+    ] = None,
+) -> None:
+    _log.debug("Input file %s", file)
+    _log.debug("Output file %s", out_file)
+    _log.debug("Config file %s", config_file)
+
+    config, name_map = level2.load_config(config_file)
+
+    out = level2.parse_l1(file, config, name_map)
+
+    out.to_netcdf(out_file)
+
+
+@app.command()
 def l2(
     flt_file: Annotated[str, typer.Argument(help="The flight (dbd/sbd) data file.")],
     sci_file: Annotated[str, typer.Argument(help="The science (ebd/tbd) data file.")],
-    out_file: Annotated[str, typer.Argument(help="The output file.")] = "slocum.l2.nc",
+    out_file: Annotated[str, typer.Option(help="The output file.")] = "slocum.l2.nc",
     config_file: Annotated[
         str | None,
-        typer.Argument(help="Processed variables are specified in this YAML file."),
+        typer.Option(help="Processed variables are specified in this YAML file."),
     ] = None,
-    output_extras: bool = False,
-    p_near_surface: float = 1.0,
-    dp_threshold: float = 5.0,
-):
+    output_extras: Annotated[
+        bool, typer.Option(help="Choose whether to output L1B files (flt/sci/merged).")
+    ] = False,
+    p_near_surface: Annotated[
+        float, typer.Option(help="Near surface pressure used for detemining profiles.")
+    ] = 1.0,
+    dp_threshold: Annotated[
+        float,
+        typer.Option(
+            help="Factor applied to determine surfaces when encountering missing data."
+        ),
+    ] = 5.0,
+) -> None:
     _log.debug("Flight file %s", flt_file)
     _log.debug("Science file %s", sci_file)
     _log.debug("Output file %s", out_file)
@@ -65,8 +94,8 @@ def l2(
 @app.command()
 def l3(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
-    out_file: Annotated[str, typer.Argument(help="The output file.")] = "slocum.l3.nc",
-    bin_size: Annotated[float, typer.Argument(help="Depth bin size in meters.")] = 10.0,
+    out_file: Annotated[str, typer.Option(help="The output file.")] = "slocum.l3.nc",
+    bin_size: Annotated[float, typer.Option(help="Depth bin size in meters.")] = 10.0,
 ) -> None:
     _log.debug("L2 file %s", l2_file)
     _log.debug("Output file %s", out_file)
