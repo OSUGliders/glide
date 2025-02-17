@@ -6,6 +6,7 @@ import logging
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
+from rich.progress import track
 
 from . import profiles as pfls
 
@@ -52,9 +53,22 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
 
     binned_profiles = []
     state = []  # Dive / climb state
-    for row in idxs:
+    profile_lat = []
+    profile_lon = []
+    profile_time = []
+
+    for row in track(idxs):
         state.append(s.values[row[0]])
         profile = ds.isel(time=slice(row[0], row[1]))
+
+        idx_mid = len(profile.time) // 2
+        time_mid = profile.time.values[idx_mid]
+        profile_time.append(time_mid)
+        profile_lat.append(profile.lat.sel(time=time_mid, method="nearest"))
+        profile_lon.append(profile.lon.sel(time=time_mid, method="nearest"))
+
+        profile["i"] = ("time", np.arange(len(profile.time)))
+        profile = profile.swap_dims({"time": "i"}).reset_coords("time")
         binned = profile.groupby_bins("depth", depth_bins).mean()
         binned["depth_bins"] = [db.mid for db in binned.depth_bins.values]
         binned_profiles.append(binned)
@@ -70,5 +84,12 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
     ds_binned = ds_binned.swap_dims({"depth": "z"}).set_coords("z")
 
     ds_binned["state"] = (("profile",), state)
+    ds_binned["profile_time"] = (("profile",), profile_time)
+    ds_binned["profile_lat"] = (("profile",), profile_lat)
+    ds_binned["profile_lon"] = (("profile",), profile_lon)
+
+    ds_binned["profile_id"] = (("profile",), np.arange(1, len(ds_binned.profile) + 1))
+    ds_binned = ds_binned.swap_dims({"profile": "profile_id"}).set_coords("profile_id")
+    ds_binned = ds_binned.set_coords(["profile_time", "profile_lat", "profile_lon"])
 
     return ds_binned.transpose()

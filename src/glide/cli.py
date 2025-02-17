@@ -9,7 +9,7 @@ from . import level2, level3
 
 _log = logging.getLogger(__name__)
 
-app = typer.Typer(pretty_exceptions_enable=False)
+app = typer.Typer()
 
 
 @app.callback()
