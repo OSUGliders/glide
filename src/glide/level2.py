@@ -123,7 +123,7 @@ def parse_l1(
     ds = format_variables(ds, config, name_map)
 
     # Initialize QC flags
-    ds = qc.init_qc_dataset(ds, config)
+    ds = qc.init_qc(ds, config)
 
     # Apply time QC
     ds = qc.time(ds)
@@ -134,7 +134,7 @@ def parse_l1(
     ds = ds.swap_dims({dim: "time"})
 
     # Apply thresholds to all variables using valid min and max from attributes
-    ds = qc.apply_data_bounds(ds)
+    ds = qc.apply_bounds(ds)
 
     # Apply gps QC, will only work on flight data
     try:
@@ -238,7 +238,8 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
 
     # Initialize quality control
     variables = ["salinity", "SA", "density", "rho0", "CT"]
-    ds = qc.init_qc_variables(ds, variables, config, ds.conductivity_qc.values)
+    ds = qc.init_qc(ds, config, variables, ds.conductivity_qc.values)
+    ds = qc.apply_bounds(ds, variables)
 
     N2, _ = gsw.Nsquared(ds.SA, ds.CT, ds.pressure, ds.lat)
     # Try interpolating N2 back onto positions of data.

@@ -112,36 +112,50 @@ def changed_elements(x: ArrayLike, y: ArrayLike) -> tuple[NDArray, NDArray]:
     return changed, unchanged
 
 
-def apply_data_bounds(ds: xr.Dataset) -> xr.Dataset:
+def apply_bounds_variable(ds: xr.Dataset, variable: str) -> xr.Dataset:
+    """nan data outside valid min and max as specified in variable attributes"""
+    y = ds[variable]
+
+    if "valid_min" not in y.attrs or "valid_max" not in y:
+        _log.debug("%s does not have valid_min or valid_max attribute, skipping", variable)
+        return ds
+
+    vmin = y.attrs["valid_min"]
+    vmax = y.attrs["valid_max"]
+
+    _log.debug(
+        "Removing %s outside %s to %s",
+        variable,
+        vmin,
+        vmax,
+    )
+
+    y_original = y.values.copy()
+
+    ds[variable] = (y.dims, nan_out_of_bounds(y, vmin, vmax), y.attrs)
+
+    # Update QC
+    changed, unchanged = changed_elements(y_original, ds[v])
+    _log.debug("%i elements changed of %i total", changed.sum(), changed.size)
+    ds = update_qc_flag(ds, variable, 4, changed)  # Outside bounds is bad
+    ds = update_qc_flag(ds, variable, 2, unchanged)  # Within is probably good
+
+    return ds
+
+
+def apply_bounds(ds: xr.Dataset, variables: Iterable | str | None = None) -> xr.Dataset:
     _log.debug("Flagging out of bounds data")
-    for v in ds.data_vars:
-        v = str(v)  # Because otherwise mypy complains...
+    if variables is None:
+        variables = ds.variables
+
+    if type(variables) is str:
+        return apply_bounds_variable(ds, variables)
+
+    for v in variables:
+        v = str(v)
         if "_qc" in v:
             continue
-        if "valid_min" not in ds[v].attrs or "valid_max" not in ds[v].attrs:
-            _log.debug("%s does not have valid_min or valid_max attribute, skipping", v)
-            continue
-
-        vmin = ds[v].attrs["valid_min"]
-        vmax = ds[v].attrs["valid_max"]
-
-        _log.debug(
-            "Removing %s outside %s to %s",
-            v,
-            vmin,
-            vmax,
-        )
-
-        original = ds[v].values.copy()
-
-        ds[v] = (ds[v].dims, nan_out_of_bounds(ds[v], vmin, vmax), ds[v].attrs)
-
-        # Update QC
-        changed, unchanged = changed_elements(original, ds[v])
-        _log.debug("%i elements changed of %i total", changed.sum(), changed.size)
-        ds = update_qc_flag(ds, v, 4, changed)  # Outside bounds is bad
-        ds = update_qc_flag(ds, v, 2, unchanged)  # Within is probably good
-
+        ds = apply_bounds_variable(ds, v)
     return ds
 
 
@@ -354,12 +368,18 @@ def init_qc_variable(
     return ds
 
 
-def init_qc_variables(
+def init_qc(
     ds: xr.Dataset,
-    variables: Iterable,
     config: dict,
+    variables: Iterable | str | None = None,
     flag_values: ArrayLike | None = None,
 ) -> xr.Dataset:
+    
+    if variables is None:
+        variables = ds.variables
+    elif type(variables) is str:
+        return init_qc_variable(ds, variables, flag_values)
+
     for v in variables:
         if v not in config:
             continue
@@ -370,14 +390,9 @@ def init_qc_variables(
         if not specs["track_qc"]:
             continue
 
-        ds = init_qc_variable(ds, str(v), flag_values)
+        ds = init_qc_variable(ds, v, flag_values)
 
     return ds
-
-
-def init_qc_dataset(ds: xr.Dataset, config: dict) -> xr.Dataset:
-    _log.debug("Initialising all qc flags")
-    return init_qc_variables(ds, ds.variables, config)
 
 
 def update_qc_flag(
