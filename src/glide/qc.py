@@ -116,7 +116,7 @@ def apply_bounds_variable(ds: xr.Dataset, variable: str) -> xr.Dataset:
     """nan data outside valid min and max as specified in variable attributes"""
     y = ds[variable]
 
-    if "valid_min" not in y.attrs or "valid_max" not in y:
+    if "valid_min" not in y.attrs or "valid_max" not in y.attrs:
         _log.debug(
             "%s does not have valid_min or valid_max attribute, skipping", variable
         )
@@ -147,6 +147,7 @@ def apply_bounds_variable(ds: xr.Dataset, variable: str) -> xr.Dataset:
 
 def apply_bounds(ds: xr.Dataset, variables: Iterable | str | None = None) -> xr.Dataset:
     _log.debug("Flagging out of bounds data")
+
     if variables is None:
         variables = ds.variables
 
@@ -157,6 +158,7 @@ def apply_bounds(ds: xr.Dataset, variables: Iterable | str | None = None) -> xr.
         v = str(v)
         if "_qc" in v:
             continue
+
         ds = apply_bounds_variable(ds, v)
     return ds
 
