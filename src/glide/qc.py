@@ -1,6 +1,7 @@
 # Functions applying quality control
 
 import logging
+from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
@@ -10,14 +11,14 @@ from numpy.typing import ArrayLike, NDArray
 _log = logging.getLogger(__name__)
 
 
-def nan_out_of_bounds(y: ArrayLike, y0: float, y1: float) -> NDArray:
+def nan_out_of_bounds(y: ArrayLike, y_min: float, y_max: float) -> NDArray:
     y = np.asarray(y)
-    y[(y < y0) | (y > y1)] = np.nan
+    y[(y < y_min) | (y > y_max)] = np.nan
     return y
 
 
 def fit_line(x0: float, y0: float, x1: float, y1: float) -> tuple[float, float]:
-    """Slope and intercept between two points (x0,y0) and (x1,y1)."""
+    """Slope and intercept between two points (x0, y0) and (x1, y1)."""
     m = (y1 - y0) / (x1 - x0)
     c = y0 - m * x0
     return m, c
@@ -111,9 +112,10 @@ def changed_elements(x: ArrayLike, y: ArrayLike) -> tuple[NDArray, NDArray]:
     return changed, unchanged
 
 
-def apply_data_bounds(ds) -> xr.Dataset:
+def apply_data_bounds(ds: xr.Dataset) -> xr.Dataset:
     _log.debug("Flagging out of bounds data")
     for v in ds.data_vars:
+        v = str(v)  # Because otherwise mypy complains...
         if "_qc" in v:
             continue
         if "valid_min" not in ds[v].attrs or "valid_max" not in ds[v].attrs:
@@ -143,13 +145,13 @@ def apply_data_bounds(ds) -> xr.Dataset:
     return ds
 
 
-def interpolate_missing(ds: xr.Dataset, var_specs: dict) -> xr.Dataset:
+def interpolate_missing(ds: xr.Dataset, config: dict) -> xr.Dataset:
     _log.debug("Interpolating missing data")
     for v in ds.data_vars:
-        if v not in var_specs:
+        if v not in config:
             continue
 
-        specs = var_specs[v]
+        specs = config[v]
         if "interpolate_missing" not in specs:
             continue
         if not specs["interpolate_missing"]:
@@ -166,7 +168,7 @@ def interpolate_missing(ds: xr.Dataset, var_specs: dict) -> xr.Dataset:
         # Update QC
         changed, _ = changed_elements(original, ds[v])
         _log.debug("%i elements changed of %i total", changed.sum(), changed.size)
-        ds = update_qc_flag(ds, str(v), 9, changed)
+        ds = update_qc_flag(ds, str(v), 8, changed)
 
     return ds
 
@@ -322,7 +324,9 @@ def gps(
     return ds
 
 
-def init_qc_var(ds: xr.Dataset, variable: str) -> xr.Dataset:
+def init_qc_variable(
+    ds: xr.Dataset, variable: str, flag_values: ArrayLike | None = None
+) -> xr.Dataset:
     _log.debug("Initialising qc flags for %s", variable)
 
     y = ds[variable]
@@ -336,33 +340,44 @@ def init_qc_var(ds: xr.Dataset, variable: str) -> xr.Dataset:
         "valid_min": np.int8(0),
     }
 
-    flag = np.zeros_like(y, dtype="b")
-    flag[~np.isfinite(y)] = 9
+    if flag_values is None:
+        flag_values = np.zeros_like(y, dtype="b")
+        flag_values[~np.isfinite(y)] = 9
+    else:
+        flag_values = np.asarray(flag_values)
 
     qcv = variable + "_qc"
 
-    ds[qcv] = (y.dims, flag, qc_attrs)
+    ds[qcv] = (y.dims, flag_values, qc_attrs)
     ds[variable].attrs["ancillary_variables"] = qcv
 
     return ds
 
 
-def init_dataset_qc(ds: xr.Dataset, var_specs: dict) -> xr.Dataset:
-    _log.debug("Initialising all qc flags")
-
-    for v in ds.variables:
-        if v not in var_specs:
+def init_qc_variables(
+    ds: xr.Dataset,
+    variables: Iterable,
+    config: dict,
+    flag_values: ArrayLike | None = None,
+) -> xr.Dataset:
+    for v in variables:
+        if v not in config:
             continue
 
-        specs = var_specs[v]
+        specs = config[v]
         if "track_qc" not in specs:
             continue
         if not specs["track_qc"]:
             continue
 
-        ds = init_qc_var(ds, str(v))
+        ds = init_qc_variable(ds, str(v), flag_values)
 
     return ds
+
+
+def init_qc_dataset(ds: xr.Dataset, config: dict) -> xr.Dataset:
+    _log.debug("Initialising all qc flags")
+    return init_qc_variables(ds, ds.variables, config)
 
 
 def update_qc_flag(

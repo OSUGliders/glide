@@ -24,3 +24,9 @@ def spm_to_mspcm(x: ArrayLike) -> NDArray:
 def rad_to_deg(x: ArrayLike) -> NDArray:
     """Convert radians to degrees."""
     return np.rad2deg(x)
+
+
+def mid(x: ArrayLike) -> NDArray:
+    """Estimate mid points of an array. Works with datetimes."""
+    x = np.asarray(x)
+    return x[:-1] + 0.5 * (x[1:] - x[:-1])

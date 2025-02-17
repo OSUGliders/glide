@@ -16,3 +16,8 @@ def test_bar_to_dbar() -> None:
 def test_spm_to_mspcm() -> None:
     C = 3
     assert np.isclose(conv.spm_to_mspcm(C), 30)
+
+
+def test_mid() -> None:
+    x = [1, 2, 4, 11]
+    assert np.isclose(conv.mid(x), [1.5, 3, 7.5]).all()

@@ -123,7 +123,7 @@ def parse_l1(
     ds = format_variables(ds, config, name_map)
 
     # Initialize QC flags
-    ds = qc.init_dataset_qc(ds, config)
+    ds = qc.init_qc_dataset(ds, config)
 
     # Apply time QC
     ds = qc.time(ds)
@@ -215,33 +215,36 @@ def merge_l1(
 def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     """Should be applied after merging flight and science."""
 
-    lon = ds.lon.interpolate_na("time")
-    lat = ds.lat.interpolate_na("time")
     dims = ds.conductivity.dims
 
-    salinity = gsw.SP_from_C(conv.spm_to_mspcm(ds.conductivity), ds.temperature, ds.pressure)
+    salinity = gsw.SP_from_C(
+        conv.spm_to_mspcm(ds.conductivity), ds.temperature, ds.pressure
+    )
     ds["salinity"] = (dims, salinity.values, config["salinity"]["CF"])
-    ds = qc.init_qc_var(ds, "salinity")
-    ds["salinity_qc"] = ds.conductivity_qc
 
+    lon = ds.lon.interpolate_na("time")
+    lat = ds.lat.interpolate_na("time")
     SA = gsw.SA_from_SP(ds.salinity, ds.pressure, lon, lat)
     ds["SA"] = (dims, SA.values, config["SA"]["CF"])
-    ds = qc.init_qc_var(ds, "SA")
-    ds["SA_qc"] = ds.conductivity_qc
 
     density = gsw.rho_t_exact(ds.SA, ds.temperature, ds.pressure)
     ds["density"] = (dims, density.values, config["density"]["CF"])
-    ds = qc.init_qc_var(ds, "density")
-    ds["density_qc"] = ds.conductivity_qc
 
     rho0 = gsw.pot_rho_t_exact(ds.SA, ds.temperature, ds.pressure, 0)
     ds["rho0"] = (dims, rho0.values, config["rho0"]["CF"])
-    ds = qc.init_qc_var(ds, "rho0")
-    ds["rho0_qc"] = ds.conductivity_qc
 
     CT = gsw.CT_from_t(ds.SA, ds.temperature, ds.pressure)
     ds["CT"] = (dims, CT.values, config["CT"]["CF"])
-    ds = qc.init_qc_var(ds, "CT")
-    ds["CT_qc"] = ds.conductivity_qc
+
+    # Initialize quality control
+    variables = ["salinity", "SA", "density", "rho0", "CT"]
+    ds = qc.init_qc_variables(ds, variables, config, ds.conductivity_qc.values)
+
+    N2, _ = gsw.Nsquared(ds.SA, ds.CT, ds.pressure, ds.lat)
+    # Try interpolating N2 back onto positions of data.
+    # This does have the effect of low-pass filtering.
+    N2 = xr.DataArray(N2, {"time": conv.mid(ds.time)})
+    ds["N2"] = (dims, N2.interp(time=ds.time).values, config["N2"]["CF"])
+    ds = qc.init_qc_variable(ds, "N2")
 
     return ds

@@ -36,3 +36,6 @@ dev = [
     "ruff>=0.9.5",
     "types-pyyaml>=6.0.12.20241230",
 ]
+
+[tool.mypy]
+disable_error_code = ["import-untyped"]

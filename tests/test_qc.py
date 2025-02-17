@@ -4,29 +4,9 @@ import xarray as xr
 import glide.qc as qc
 
 
-def test_nan_out_of_bounds() -> None:
-    y = [0.0, 1.1, 2.0, 2.9, 4.0]
-    y_ = qc.nan_out_of_bounds(y, 1, 3)
-    assert np.isnan(y_[0])
-    assert np.isnan(y_[-1])
-    assert np.isfinite(y_[1:4]).all()
-
-
-def test_time() -> None:
-    ds = xr.Dataset(
-        {
-            "foo": (
-                "i",
-                [1739052713, 1739052713, float("NaN"), 1739052715, 43324210293429],
-            ),
-        }
-    )
-    ds = qc.time(ds, "foo")
-    assert ds.foo.size == 2
-    assert list(ds.foo.values) == [1739052713, 1739052715]
-
-
-def test_gps() -> None:
+def initialise_test_data() -> xr.Dataset:
+    # Fake data with 3 surfaces and 2 profiles inbetween.
+    # Four points in each surfacing. Five points in the profiles.
     ds = xr.Dataset(
         {
             "lon": (
@@ -55,6 +35,10 @@ def test_gps() -> None:
                     float("NaN"),
                     float("NaN"),
                 ],
+                {
+                    "standard_name": "longitude",
+                    "long_name": "Longitude",
+                },
             ),
             "lat": (
                 "time",
@@ -172,6 +156,33 @@ def test_gps() -> None:
             )
         },
     )
+    return ds
+
+
+def test_nan_out_of_bounds() -> None:
+    y = [0.0, 1.1, 2.0, 2.9, 4.0]
+    y_ = qc.nan_out_of_bounds(y, 1, 3)
+    assert np.isnan(y_[0])
+    assert np.isnan(y_[-1])
+    assert np.isfinite(y_[1:4]).all()
+
+
+def test_time() -> None:
+    ds = xr.Dataset(
+        {
+            "foo": (
+                "i",
+                [1739052713, 1739052713, float("NaN"), 1739052715, 43324210293429],
+            ),
+        }
+    )
+    ds = qc.time(ds, "foo")
+    assert ds.foo.size == 2
+    assert list(ds.foo.values) == [1739052713, 1739052715]
+
+
+def test_gps() -> None:
+    ds = initialise_test_data()
 
     m0, c0 = qc.fit_line(
         ds.time[3].values,
@@ -188,3 +199,13 @@ def test_gps() -> None:
     ds_ = qc.gps(ds.copy(), dt=50)
 
     assert np.isclose(ds_.lon[4:9].values, lon_corrected).all()
+
+
+def test_init_qc_variable() -> None:
+    ds = initialise_test_data()
+
+    ds = qc.init_qc_variable(ds, "lon")
+    assert "lon_qc" in ds.variables
+    assert ds.lon_qc.attrs["standard_name"] == "longitude status_flag"
+    assert ds.lon.attrs["ancillary_variables"] == "lon_qc"
+    assert (ds.lon_qc[np.isnan(ds.lon_qc)] == 9).all()

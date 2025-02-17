@@ -266,3 +266,11 @@ CT:
     # accuracy: 0.002
     # precision: 0.001
     # resolution: 0.0002
+
+N2:
+  track_qc: False
+  CF:
+    long_name: Buoyancy frequency squared
+    standard_name: square_of_brunt_vaisala_frequency_in_sea_water
+    units: s-1
+    observations_type: calculated
