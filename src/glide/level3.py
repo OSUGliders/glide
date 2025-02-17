@@ -22,10 +22,8 @@ def get_profile_indexes(ds: xr.Dataset) -> NDArray:
     """Find the dive and climb indexes."""
     id = pfls.contiguous_regions(np.isfinite(ds.dive_id.values))
     ic = pfls.contiguous_regions(np.isfinite(ds.climb_id.values))
-    idxs = np.empty((id.shape[0] + ic.shape[0], id.shape[1]), dtype=int)
-    idxs[::2, :] = id
-    idxs[1::2, :] = ic
-    return idxs
+    idxs = np.vstack((ic, id))
+    return idxs[np.argsort(idxs[:, 0]), :]
 
 
 def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
