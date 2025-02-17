@@ -159,6 +159,11 @@ def initialise_test_data() -> xr.Dataset:
     return ds
 
 
+def test_fit_line() -> None:
+    assert np.isclose(qc.fit_line(0, 0, 1, 2), (2, 0)).all()
+    assert np.isclose(qc.fit_line(-2, 2, 2, -1), (-3 / 4, 2 - 3 / 2)).all()
+
+
 def test_nan_out_of_bounds() -> None:
     y = [0.0, 1.1, 2.0, 2.9, 4.0]
     y_ = qc.nan_out_of_bounds(y, 1, 3)
