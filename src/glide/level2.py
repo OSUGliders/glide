@@ -27,24 +27,16 @@ def load_config(file: str | None = None) -> tuple[dict, dict]:
         config = safe_load(f)
 
     # Generate mapping from Slocum source name to dataset name
-    name_map = dict()
-    for name, specs in config.items():
-        if "source" not in specs:
-            continue
+    name_map = {
+        sn: name
+        for name, specs in config.items()
+        if "source" in specs
+        for sn in (
+            specs["source"] if isinstance(specs["source"], list) else [specs["source"]]
+        )
+    }
 
-        source = specs["source"]
-        if type(source) is str:
-            name_map[source] = name
-            continue
-
-        try:
-            for sn in source:
-                name_map[sn] = name
-        except TypeError:
-            continue
-
-    _log.debug("Name mapping dict % s", name_map)
-
+    _log.debug("Name mapping dict %s", name_map)
     return config, name_map
 
 
@@ -66,7 +58,6 @@ def format_variables(
     }
     for var, name in reduced_name_map.items():
         _log.debug("Formatting variable %s", var)
-
         specs = config[name]
 
         if "conversion" in specs:
@@ -90,7 +81,6 @@ def format_variables(
     ds = ds.drop_vars(remaining_vars)
 
     _log.debug("Variables remaining in dataset %s", list(ds.keys()))
-
     return ds
 
 
@@ -106,7 +96,7 @@ def parse_l1(
     if config is None or name_map is None:
         config, name_map = load_config(config_file)
 
-    if type(file) is str:
+    if isinstance(file, str):
         _log.debug("Parsing L1 %s", file)
         try:
             ds = xr.open_dataset(file).drop_dims("j")
@@ -115,8 +105,7 @@ def parse_l1(
         except ValueError:
             ds = pd.read_csv(file).to_xarray()
             _log.debug("pandas.read_csv opened %s", file)
-
-    elif type(file) is xr.Dataset:  # Primarily for testing
+    elif isinstance(file, xr.Dataset):  # Primarily for testing
         ds = file
     else:
         raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
@@ -200,7 +189,7 @@ def merge_l1(
         except KeyError:
             pass
 
-        _log.debug("Iterpolating %s", v)
+        _log.debug("Interpolating %s", v)
         ds[v] = (
             "time",
             ds_to_interp[v].interp(time=time_interpolant, assume_sorted=True).values,
