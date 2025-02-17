@@ -1,6 +1,7 @@
 # The command line interface entry point for glide.
 
 import logging
+from pathlib import Path
 
 import typer
 from typing_extensions import Annotated
@@ -27,6 +28,9 @@ def l2(
         str | None,
         typer.Argument(help="Processed variables are specified in this YAML file."),
     ] = None,
+    output_extras: bool = False,
+    p_near_surface: float = 1.0,
+    dp_threshold: float = 5.0,
 ):
     _log.debug("Flight file %s", flt_file)
     _log.debug("Science file %s", sci_file)
@@ -38,11 +42,22 @@ def l2(
     flt = level2.parse_l1(flt_file, config, name_map)
     sci = level2.parse_l1(sci_file, config, name_map)
 
-    out = level2.merge_l1(flt, sci, "science", config)
+    if output_extras:
+        _log.debug("Saving parsed flight and science output")
+        out_dir = Path(out_file).parent
+        flt.to_netcdf(Path(out_dir, "flt.nc"))
+        sci.to_netcdf(Path(out_dir, "sci.nc"))
 
-    out = level2.calculate_thermodynamics(out, config)
+    merged = level2.merge_l1(flt, sci, "science", config)
 
-    out = level2.get_profiles(out)
+    merged = level2.calculate_thermodynamics(merged, config)
+
+    if output_extras:
+        _log.debug("Saving merged output")
+        out_dir = Path(out_file).parent
+        merged.to_netcdf(Path(out_dir, "merged.nc"))
+
+    out = level2.get_profiles(merged, p_near_surface, dp_threshold)
 
     out.to_netcdf(out_file)
 

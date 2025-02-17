@@ -116,7 +116,7 @@ def parse_l1(
         ds = file
     else:
         raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
-    
+
     # Check for name conflicts
     ds = fix_time_varaiable_conflict(ds)
 
@@ -259,8 +259,12 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     return ds
 
 
-def get_profiles(ds: xr.Dataset) -> xr.Dataset:
-    dive_id, climb_id, state = pfls.find_profiles_using_logic(ds.pressure)
+def get_profiles(
+    ds: xr.Dataset, p_near_surface: float, dp_threshold: float
+) -> xr.Dataset:
+    dive_id, climb_id, state = pfls.find_profiles_using_logic(
+        ds.pressure, p_near_surface, dp_threshold
+    )
     ds["dive_id"] = ("time", dive_id, dict(_FillValue=-1))
     ds["climb_id"] = ("time", climb_id, dict(_FillValue=-1))
     ds["state"] = (
