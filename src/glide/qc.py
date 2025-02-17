@@ -117,7 +117,9 @@ def apply_bounds_variable(ds: xr.Dataset, variable: str) -> xr.Dataset:
     y = ds[variable]
 
     if "valid_min" not in y.attrs or "valid_max" not in y:
-        _log.debug("%s does not have valid_min or valid_max attribute, skipping", variable)
+        _log.debug(
+            "%s does not have valid_min or valid_max attribute, skipping", variable
+        )
         return ds
 
     vmin = y.attrs["valid_min"]
@@ -135,7 +137,7 @@ def apply_bounds_variable(ds: xr.Dataset, variable: str) -> xr.Dataset:
     ds[variable] = (y.dims, nan_out_of_bounds(y, vmin, vmax), y.attrs)
 
     # Update QC
-    changed, unchanged = changed_elements(y_original, ds[v])
+    changed, unchanged = changed_elements(y_original, y)
     _log.debug("%i elements changed of %i total", changed.sum(), changed.size)
     ds = update_qc_flag(ds, variable, 4, changed)  # Outside bounds is bad
     ds = update_qc_flag(ds, variable, 2, unchanged)  # Within is probably good
@@ -374,13 +376,13 @@ def init_qc(
     variables: Iterable | str | None = None,
     flag_values: ArrayLike | None = None,
 ) -> xr.Dataset:
-    
     if variables is None:
         variables = ds.variables
     elif type(variables) is str:
         return init_qc_variable(ds, variables, flag_values)
 
     for v in variables:
+        v = str(v)
         if v not in config:
             continue
 
