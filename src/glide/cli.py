@@ -96,14 +96,24 @@ def l3(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
     out_file: Annotated[str, typer.Option(help="The output file.")] = "slocum.l3.nc",
     bin_size: Annotated[float, typer.Option(help="Depth bin size in meters.")] = 10.0,
+    q_netcdf: Annotated[str | None, typer.Option(help="netCDF file(s) processed by q2netcdf.")] = None,
+    config_file: Annotated[
+        str | None,
+        typer.Option(help="Processed variables are specified in this YAML file."),
+    ] = None,
 ) -> None:
     _log.debug("L2 file %s", l2_file)
     _log.debug("Output file %s", out_file)
     _log.debug("Bin size %s", bin_size)
+    _log.debug("q netcdf file %s", q_netcdf)
 
     l2 = level3.parse_l2(l2_file)
 
     out = level3.bin_l2(l2, bin_size)
+
+    if q_netcdf is not None:
+        config, _ = level2.load_config(config_file)
+        out = level3.bin_q(out, q_netcdf, bin_size, config)
 
     out.to_netcdf(out_file)
 

@@ -1,7 +1,7 @@
 # Variable formatting follows national gdlier DAC netCDF format version 2
 # https://ioos.github.io/glider-dac/ngdac-netcdf-file-format-version-2
 
-# FLIGHT VARIABLES
+# TIME VARIABLES
 
 time: # This is the name the we want
   # This list of sources can only be done for variables that do not appear in the same file
@@ -15,6 +15,8 @@ time: # This is the name the we want
     units: seconds since 1970-01-01T00:00:00Z
     axis: T
     observation_type: "measured"
+
+# FLIGHT VARIABLES
 
 lat: # This is the name that we want
   source: m_lat  # This is the name that Slocum gliders use
@@ -192,6 +194,8 @@ temperature:
     precision: 0.001
     resolution: 0.0002
 
+# CALCULATED VARIABLES
+
 salinity:
   track_qc: True
   CF:
@@ -299,4 +303,26 @@ z:
     positive: "up"
     reference_datum: "sea-surface"
     instrument: "instrument_ctd"
+    observation_type: "calculated"
+
+e_1: 
+  CF: 
+    long_name: TKE dissipation rate
+    standard_name: specific_turbulent_kinetic_energy_dissipation_in_sea_water
+    comment: Estimated using shear probe 1
+    units: W kg-1
+    valid_min: 0.0
+    valid_max: 0.001
+    instrument: "instrument_microrider"
+    observation_type: "calculated"
+
+e_2: 
+  CF: 
+    long_name: TKE dissipation rate
+    standard_name: specific_turbulent_kinetic_energy_dissipation_in_sea_water
+    comment: Estimated using shear probe 2
+    units: W kg-1
+    valid_min: 0.0
+    valid_max: 0.001
+    instrument: "instrument_microrider"
     observation_type: "calculated"

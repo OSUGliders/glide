@@ -117,16 +117,12 @@ def parse_l1(
     else:
         raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
 
-    # Check for name conflicts
     ds = fix_time_varaiable_conflict(ds)
 
-    # Apply CF conventions, rename variables
     ds = format_variables(ds, config, name_map)
 
-    # Initialize QC flags
     ds = qc.init_qc(ds, config)
 
-    # Apply time QC
     ds = qc.time(ds)
 
     # Make time the coordinate.
@@ -134,7 +130,6 @@ def parse_l1(
     _log.debug("Swapping dimension %s for time", dim)
     ds = ds.swap_dims({dim: "time"})
 
-    # Apply thresholds to all variables using valid min and max from attributes
     ds = qc.apply_bounds(ds)
 
     # Apply gps QC, will only work on flight data
@@ -271,6 +266,7 @@ def get_profiles(
         "time",
         state.astype("b"),
         dict(
+            long_name="Glider state",
             flag_values=np.array([-1, 0, 1, 2], "b"),
             flag_meanings="state_unknown surfaced diving climbing",
             valid_max=np.int8(3),
