@@ -34,7 +34,9 @@ def l1b(
 
     config, name_map = level2.load_config(config_file)
 
-    out = level2.parse_l1(file, config, name_map)
+    out = level2.parse_l1(file)
+
+    out = level2.apply_qc(out, config, name_map)
 
     out.to_netcdf(out_file)
 
@@ -68,22 +70,25 @@ def l2(
 
     config, name_map = level2.load_config(config_file)
 
-    flt = level2.parse_l1(flt_file, config, name_map)
-    sci = level2.parse_l1(sci_file, config, name_map)
+    flt = level2.parse_l1(flt_file)
+    sci = level2.parse_l1(sci_file)
+
+    flt = level2.apply_qc(flt, config, name_map)
+    sci = level2.apply_qc(sci, config, name_map)
 
     if output_extras:
-        _log.debug("Saving parsed flight and science output")
         out_dir = Path(out_file).parent
+        _log.debug("Saving parsed flight and science output to %s", out_dir)
         flt.to_netcdf(Path(out_dir, "flt.nc"))
         sci.to_netcdf(Path(out_dir, "sci.nc"))
 
-    merged = level2.merge_l1(flt, sci, "science", config)
+    merged = level2.merge(flt, sci, "science", config)
 
     merged = level2.calculate_thermodynamics(merged, config)
 
     if output_extras:
-        _log.debug("Saving merged output")
         out_dir = Path(out_file).parent
+        _log.debug("Saving merged output to %s", out_dir)
         merged.to_netcdf(Path(out_dir, "merged.nc"))
 
     out = level2.get_profiles(merged, p_near_surface, dp_threshold)
@@ -96,7 +101,9 @@ def l3(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
     out_file: Annotated[str, typer.Option(help="The output file.")] = "slocum.l3.nc",
     bin_size: Annotated[float, typer.Option(help="Depth bin size in meters.")] = 10.0,
-    q_netcdf: Annotated[str | None, typer.Option(help="netCDF file(s) processed by q2netcdf.")] = None,
+    q_netcdf: Annotated[
+        str | None, typer.Option(help="netCDF file(s) processed by q2netcdf.")
+    ] = None,
     config_file: Annotated[
         str | None,
         typer.Option(help="Processed variables are specified in this YAML file."),

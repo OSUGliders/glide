@@ -3,14 +3,14 @@
 
 import logging
 
+import gsw
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 from rich.progress import track
-import gsw
 
-from . import profiles as pfls
 from . import convert as conv
+from . import profiles as pfls
 
 _log = logging.getLogger(__name__)
 
@@ -77,7 +77,11 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
         profile = profile.swap_dims({"time": "i"}).reset_coords("time")
         profile["time"] = ("i", profile.time.data.astype(float), profile.time.attrs)
         binned = profile.groupby_bins("depth", depth_bins).mean()
-        binned["time"] = ("depth_bins", binned.time.data.astype("M8[ns]"), binned.time.attrs)
+        binned["time"] = (
+            "depth_bins",
+            binned.time.data.astype("M8[ns]"),
+            binned.time.attrs,
+        )
 
         binned["depth_bins"] = [db.mid for db in binned.depth_bins.values]
         binned_profiles.append(binned)
@@ -107,7 +111,6 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
 
 
 def bin_q(ds: xr.Dataset, q_netcdf: str, bin_size: float, config: dict) -> xr.Dataset:
-
     _log.debug("Loading Q files")
     # Extract a subset of just the dissipation values
     qds = xr.open_mfdataset(q_netcdf, decode_timedelta=False)
@@ -115,17 +118,19 @@ def bin_q(ds: xr.Dataset, q_netcdf: str, bin_size: float, config: dict) -> xr.Da
     eds = qds[["e_1", "e_2"]]
     eds["depth"] = -gsw.z_from_p(qds.pressure, ds.profile_lat.mean().values)
 
-    depth_bins = np.arange(-ds.z[0] - bin_size/2, -ds.z[-1] + 1.5*bin_size, bin_size)
+    depth_bins = np.arange(
+        -ds.z[0] - bin_size / 2, -ds.z[-1] + 1.5 * bin_size, bin_size
+    )
     _log.debug("Epsilon depth bins %s", depth_bins)
 
     # Initialize data arrays
     dims = ds.conductivity.dims
-    
+
     dissipation_variables = ["e_1", "e_2"]
     for v in track(dissipation_variables):
         ds[v] = (dims, np.full_like(ds.conductivity.values, np.nan), config[v]["CF"])
         # Convert from log
-        eds[v] = (eds[v].dims, 10**eds[v].values)
+        eds[v] = (eds[v].dims, 10 ** eds[v].values)
 
     for i in range(ds.profile_id.size):
         ds_ = ds.isel(profile_id=i)
@@ -137,5 +142,5 @@ def bin_q(ds: xr.Dataset, q_netcdf: str, bin_size: float, config: dict) -> xr.Da
 
         for v in dissipation_variables:
             ds[v][:, i] = binned[v].values
-        
+
     return ds

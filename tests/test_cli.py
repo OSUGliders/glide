@@ -7,6 +7,14 @@ from glide.cli import app
 runner = CliRunner()
 
 
+def test_l1b() -> None:
+    flt_file = str(resources.files("tests").joinpath("data/osu684.sbd.nc"))
+    out_file = str(resources.files("tests").joinpath("data/slocum.l1b.nc"))
+    result = runner.invoke(app, ["l1b", flt_file, "--out-file", out_file])
+
+    assert result.exit_code == 0
+
+
 def test_l2() -> None:
     flt_file = str(resources.files("tests").joinpath("data/osu684.sbd.nc"))
     sci_file = str(resources.files("tests").joinpath("data/osu684.tbd.nc"))

@@ -91,17 +91,9 @@ def fix_time_varaiable_conflict(ds: xr.Dataset) -> xr.Dataset:
         return ds
 
 
-def parse_l1(
-    file: str | xr.Dataset,
-    config: dict | None = None,
-    name_map: dict | None = None,
-    config_file: str | None = None,
-) -> xr.Dataset:
+def parse_l1(file: str | xr.Dataset) -> xr.Dataset:
     """Parses flight (sbd) or science (tbd) data processed by dbd2netcdf or dbd2csv.
     Applies IOOS glider DAC attributes."""
-
-    if config is None or name_map is None:
-        config, name_map = load_config(config_file)
 
     if isinstance(file, str):
         _log.debug("Parsing L1 %s", file)
@@ -116,6 +108,20 @@ def parse_l1(
         ds = file
     else:
         raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
+
+    return ds
+
+
+def apply_qc(
+    ds: xr.Dataset,
+    config: dict | None = None,
+    name_map: dict | None = None,
+    config_file: str | None = None,
+) -> xr.Dataset:
+    """The standard suite of L2 QC."""
+
+    if config is None or name_map is None:
+        config, name_map = load_config(config_file)
 
     ds = fix_time_varaiable_conflict(ds)
 
@@ -151,7 +157,7 @@ def parse_l1(
     return ds
 
 
-def merge_l1(
+def merge(
     flt: xr.Dataset,
     sci: xr.Dataset,
     times_from: str = "science",
