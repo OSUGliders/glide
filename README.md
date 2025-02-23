@@ -1,8 +1,8 @@
-# glide (under construction)
+# glide
 
 Slocum underwater glider processing command line interface. 
 
-`glide` produces quality controlled L2 and L3 datasets from real-time and delayed-time Slocum glider data. It can generate datasets that meet [IOOS Glider DAC](https://gliders.ioos.us/) standards. It requires that data are first converted to netCDF or csv using [`dbd2netcdf`](github.com/OSUGliders/dbd2netcdf) (or `dbd2csv`), a very fast Dinkum binary conversion tool. 
+glide produces quality controlled L2 and L3 datasets from real-time and delayed-time Slocum glider data. It can generate datasets that meet [IOOS Glider DAC](https://gliders.ioos.us/) standards. It requires that data are first converted to netCDF or csv using [`dbd2netcdf`](github.com/OSUGliders/dbd2netcdf) (or `dbd2csv`), a very fast Dinkum binary conversion tool. 
 
 Our definitions of data processing levels are guided by [NASA](https://www.earthdata.nasa.gov/learn/earth-observation-data-basics/data-processing-levels), the [Spray data](https://spraydata.ucsd.edu/data-access), and our own experiences working with gliders. We define the following levels:
 
@@ -34,10 +34,10 @@ Assuming that you have already run `dbd2netcdf` over a directory of files (e.g. 
 glide l2 glidername.sbd.nc glidername.tbd.nc --out-file=glidername.l2.nc --config-file=glidername.config.yml
 ```
 
-To perform level 3 processing use:
+To perform level 3 processing with a specific bin size, use:
 
 ```
-glide l3 glidername.l2.nc --out-file=glidername.l3.nc --config-file=glidername.config.yml
+glide l3 glidername.l2.nc --out-file=glidername.l3.nc --config-file=glidername.config.yml --bin-size=10
 ```
 
 To view the help for the package, or a specific command, use:
