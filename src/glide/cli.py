@@ -22,10 +22,16 @@ def main(log_level: str = "WARN"):
 @app.command()
 def l1b(
     file: Annotated[str, typer.Argument(help="The sbd/tbd/dbd/ebd data file.")],
-    out_file: Annotated[str, typer.Option(help="The output file.")] = "slocum.l1b.nc",
+    out_file: Annotated[
+        str, typer.Option("--out", "-o", help="The output file.")
+    ] = "slocum.l1b.nc",
     config_file: Annotated[
         str | None,
-        typer.Option(help="Processed variables are specified in this YAML file."),
+        typer.Option(
+            "--config",
+            "-c",
+            help="Processed variables are specified in this YAML file.",
+        ),
     ] = None,
 ) -> None:
     _log.debug("Input file %s", file)
@@ -45,13 +51,24 @@ def l1b(
 def l2(
     flt_file: Annotated[str, typer.Argument(help="The flight (dbd/sbd) data file.")],
     sci_file: Annotated[str, typer.Argument(help="The science (ebd/tbd) data file.")],
-    out_file: Annotated[str, typer.Option(help="The output file.")] = "slocum.l2.nc",
+    out_file: Annotated[
+        str, typer.Option("--out", "-o", help="The output file.")
+    ] = "slocum.l2.nc",
     config_file: Annotated[
         str | None,
-        typer.Option(help="Processed variables are specified in this YAML file."),
+        typer.Option(
+            "--config",
+            "-c",
+            help="Processed variables are specified in this YAML file.",
+        ),
     ] = None,
     output_extras: Annotated[
-        bool, typer.Option(help="Choose whether to output L1B files (flt/sci/merged).")
+        bool,
+        typer.Option(
+            "--extras",
+            "-e",
+            help="Choose whether to output L1B files (flt/sci/merged).",
+        ),
     ] = False,
     p_near_surface: Annotated[
         float, typer.Option(help="Near surface pressure used for detemining profiles.")
@@ -99,14 +116,23 @@ def l2(
 @app.command()
 def l3(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
-    out_file: Annotated[str, typer.Option(help="The output file.")] = "slocum.l3.nc",
-    bin_size: Annotated[float, typer.Option(help="Depth bin size in meters.")] = 10.0,
+    out_file: Annotated[
+        str, typer.Option("--out", "-o", help="The output file.")
+    ] = "slocum.l3.nc",
+    bin_size: Annotated[
+        float, typer.Option("--bin", "-b", help="Depth bin size in meters.")
+    ] = 10.0,
     q_netcdf: Annotated[
-        str | None, typer.Option(help="netCDF file(s) processed by q2netcdf.")
+        str | None,
+        typer.Option("--q-in", "-q", help="netCDF file(s) processed by q2netcdf."),
     ] = None,
     config_file: Annotated[
         str | None,
-        typer.Option(help="Processed variables are specified in this YAML file."),
+        typer.Option(
+            "--config",
+            "-c",
+            help="Processed variables are specified in this YAML file.",
+        ),
     ] = None,
 ) -> None:
     _log.debug("L2 file %s", l2_file)

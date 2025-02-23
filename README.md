@@ -31,13 +31,13 @@ Assuming that you have already run `dbd2netcdf` over a directory of files (e.g. 
 
 
 ```
-glide l2 glidername.sbd.nc glidername.tbd.nc --out-file=glidername.l2.nc --config-file=glidername.config.yml
+glide l2 glidername.sbd.nc glidername.tbd.nc -o glidername.l2.nc -c glidername.config.yml
 ```
 
 To perform level 3 processing with a specific bin size, use:
 
 ```
-glide l3 glidername.l2.nc --out-file=glidername.l3.nc --config-file=glidername.config.yml --bin-size=10
+glide l3 glidername.l2.nc -o glidername.l3.nc -c glidername.config.yml -b 10
 ```
 
 To view the help for the package, or a specific command, use:
