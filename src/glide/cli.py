@@ -149,5 +149,3 @@ def l3(
         out = level3.bin_q(out, q_netcdf, bin_size, config)
 
     out.to_netcdf(out_file)
-
-    return None

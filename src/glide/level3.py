@@ -7,9 +7,7 @@ import gsw
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
-from rich.progress import track
 
-from . import convert as conv
 from . import profiles as pfls
 
 _log = logging.getLogger(__name__)
@@ -59,7 +57,7 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
     profile_time_start = []
     profile_time_end = []
 
-    for row in track(idxs):
+    for row in idxs:
         state.append(s.values[row[0]])
         profile = ds.isel(time=slice(row[0], row[1]))
 
@@ -127,7 +125,7 @@ def bin_q(ds: xr.Dataset, q_netcdf: str, bin_size: float, config: dict) -> xr.Da
     dims = ds.conductivity.dims
 
     dissipation_variables = ["e_1", "e_2"]
-    for v in track(dissipation_variables):
+    for v in dissipation_variables:
         ds[v] = (dims, np.full_like(ds.conductivity.values, np.nan), config[v]["CF"])
         # Convert from log
         eds[v] = (eds[v].dims, 10 ** eds[v].values)

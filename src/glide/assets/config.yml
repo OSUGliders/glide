@@ -276,7 +276,7 @@ N2:
   CF:
     long_name: Buoyancy frequency squared
     standard_name: square_of_brunt_vaisala_frequency_in_sea_water
-    units: s-1
+    units: s-2
     observations_type: calculated
 
 depth:
