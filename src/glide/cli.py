@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 from typing_extensions import Annotated
 
-from . import level2, level3
+from . import config, level2, level3
 
 _log = logging.getLogger(__name__)
 
@@ -38,11 +38,11 @@ def l1b(
     _log.debug("Output file %s", out_file)
     _log.debug("Config file %s", config_file)
 
-    config, name_map = level2.load_config(config_file)
+    conf, name_map = config.load_config(config_file)
 
     out = level2.parse_l1(file)
 
-    out = level2.apply_qc(out, config, name_map)
+    out = level2.apply_qc(out, conf, name_map)
 
     out.to_netcdf(out_file)
 
@@ -85,13 +85,13 @@ def l2(
     _log.debug("Output file %s", out_file)
     _log.debug("Config file %s", config_file)
 
-    config, name_map = level2.load_config(config_file)
+    conf, name_map = config.load_config(config_file)
 
     flt = level2.parse_l1(flt_file)
     sci = level2.parse_l1(sci_file)
 
-    flt = level2.apply_qc(flt, config, name_map)
-    sci = level2.apply_qc(sci, config, name_map)
+    flt = level2.apply_qc(flt, conf, name_map)
+    sci = level2.apply_qc(sci, conf, name_map)
 
     if output_extras:
         out_dir = Path(out_file).parent
@@ -99,9 +99,9 @@ def l2(
         flt.to_netcdf(Path(out_dir, "flt.nc"))
         sci.to_netcdf(Path(out_dir, "sci.nc"))
 
-    merged = level2.merge(flt, sci, "science", config)
+    merged = level2.merge(flt, sci, "science", conf)
 
-    merged = level2.calculate_thermodynamics(merged, config)
+    merged = level2.calculate_thermodynamics(merged, conf)
 
     if output_extras:
         out_dir = Path(out_file).parent
@@ -145,7 +145,7 @@ def l3(
     out = level3.bin_l2(l2, bin_size)
 
     if q_netcdf is not None:
-        config, _ = level2.load_config(config_file)
-        out = level3.bin_q(out, q_netcdf, bin_size, config)
+        conf, _ = config.load_config(config_file)
+        out = level3.bin_q(out, q_netcdf, bin_size, conf)
 
     out.to_netcdf(out_file)

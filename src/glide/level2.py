@@ -7,37 +7,12 @@ import gsw
 import numpy as np
 import pandas as pd
 import xarray as xr
-from yaml import safe_load
 
 from . import convert as conv
 from . import profiles as pfls
 from . import qc
 
 _log = logging.getLogger(__name__)
-
-
-def load_config(file: str | None = None) -> tuple[dict, dict]:
-    """Extract variable specifications from a yaml file."""
-    if file is None:
-        from importlib import resources
-
-        file = str(resources.files("glide").joinpath("assets/config.yml"))
-
-    with open(file) as f:
-        config = safe_load(f)
-
-    # Generate mapping from Slocum source name to dataset name
-    name_map = {
-        sn: name
-        for name, specs in config.items()
-        if "source" in specs
-        for sn in (
-            specs["source"] if isinstance(specs["source"], list) else [specs["source"]]
-        )
-    }
-
-    _log.debug("Name mapping dict %s", name_map)
-    return config, name_map
 
 
 def format_variables(
@@ -50,6 +25,8 @@ def format_variables(
     Drops variables that are not in the file."""
 
     if config is None or name_map is None:
+        from .config import load_config
+
         config, name_map = load_config(config_file)
 
     _log.debug("Formatting variables")
@@ -121,6 +98,8 @@ def apply_qc(
     """The standard suite of L2 QC."""
 
     if config is None or name_map is None:
+        from .config import load_config
+
         config, name_map = load_config(config_file)
 
     ds = fix_time_varaiable_conflict(ds)
@@ -168,6 +147,8 @@ def merge(
     The science time vector is used by default."""
 
     if config is None:
+        from .config import load_config
+
         config, _ = load_config(config_file)
 
     if times_from == "science":

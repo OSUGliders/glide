@@ -1,5 +1,5 @@
 # Level 3 processing parsed the level 2 processed data
-# Data are binned in height
+# Data are binned in depth
 
 import logging
 
