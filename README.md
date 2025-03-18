@@ -52,8 +52,9 @@ glide l2 --help
 We currently apply the following QC during L1 -> L2 processing:
 
 * Drop missing or repeated timestamps. 
-* Check data are within `valid_min` and `valid_max` limits specified in the configuration file. 
-* Linearly adjusts dead reckoned longitude and latitude estimates between surface fixes. 
+* Check data are within `valid_min` and `valid_max` limits specified in the configuration file.
+* Interpolation of missing dead reckoned location.
+* Linearly adjust dead reckoned longitude and latitude estimates between surface fixes. 
 
 We plan to implement more of the [standard IOOS QC methods](https://cdn.ioos.noaa.gov/media/2017/12/Manual-for-QC-of-Glider-Data_05_09_16.pdf) in the future.
 
