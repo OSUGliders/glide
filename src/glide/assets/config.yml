@@ -194,6 +194,18 @@ temperature:
     precision: 0.001
     resolution: 0.0002
 
+oxygen:
+  source: sci_oxy4_oxygen
+  CF:
+    instrument: instrument_oxygen
+    long_name: Dissolved Oxygen Concentration
+    observation_type: calculated
+    platform: platform
+    standard_name: moles_of_oxygen_per_unit_mass_in_sea_water
+    valid_max: 500.0
+    valid_min: 0.0
+
+
 # CALCULATED VARIABLES
 
 salinity:
