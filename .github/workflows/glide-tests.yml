@@ -25,3 +25,9 @@ jobs:
 
       - name: Run type checks
         run: uv run mypy src tests
+
+      - name: Run formatting check
+        run: uv run ruff format --check
+
+      - name: Run import formatting check
+        run: uv run ruff check --select I
