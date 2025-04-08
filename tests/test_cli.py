@@ -8,7 +8,7 @@ runner = CliRunner()
 
 
 def test_l1b() -> None:
-    flt_file = str(resources.files("tests").joinpath("data/osu684.sbd.nc"))
+    flt_file = str(resources.files("tests").joinpath("data/osu684.sbd.csv"))
     out_file = str(resources.files("tests").joinpath("data/slocum.l1b.nc"))
     result = runner.invoke(app, ["l1b", flt_file, "-o", out_file])
 
@@ -16,8 +16,8 @@ def test_l1b() -> None:
 
 
 def test_l2() -> None:
-    flt_file = str(resources.files("tests").joinpath("data/osu684.sbd.nc"))
-    sci_file = str(resources.files("tests").joinpath("data/osu684.tbd.nc"))
+    flt_file = str(resources.files("tests").joinpath("data/osu684.sbd.csv"))
+    sci_file = str(resources.files("tests").joinpath("data/osu684.tbd.csv"))
     out_file = str(resources.files("tests").joinpath("data/slocum.l2.nc"))
     result = runner.invoke(app, ["l2", flt_file, sci_file, "-o", out_file])
 

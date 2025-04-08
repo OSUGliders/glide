@@ -1,0 +1,33 @@
+name: glide tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install the project
+        run: uv sync --all-extras --dev
+
+      - name: Run tests
+        run: uv run pytest -v tests
+
+      - name: Run type checks
+        run: uv run mypy src tests
+
+      - name: Run formatting check
+        run: uv run ruff format --check
+
+      - name: Run import formatting check
+        run: uv run ruff check --select I
