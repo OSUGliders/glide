@@ -22,3 +22,6 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -v tests
+
+      - name: Run type checks
+        run: uv run mypy --strict --ignore-missing-imports --follow-imports=skip --exclude tests
