@@ -16,7 +16,11 @@ app = typer.Typer()
 @app.callback()
 def main(log_level: str = "WARN"):
     """Configure the logging level."""
-    logging.basicConfig(level=getattr(logging, log_level.upper()))
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper()),
+        format="%(asctime)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
 
 
 @app.command()
