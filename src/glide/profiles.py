@@ -60,38 +60,61 @@ def find_profiles_using_logic(
     dive_ids = np.full_like(p, UNKNOWN, dtype=int)
     climb_ids = np.full_like(p, UNKNOWN, dtype=int)
 
-    dive_id, climb_id = 0, 0
-    idx_dive_start, idx_dive_end = 0, 0
-    dp_latest = 0.0
+    def update_state(i, p, dp_latest, state):
+        p0 = p[i]
+        p1 = p[i + 1]
+        output_state = None
 
-    def update_state(i, i1, p0, p1):
-        nonlocal dp_latest
         if np.isfinite(p1) and np.isfinite(p0):
             dp_latest = np.abs(p1 - p0)
 
-        if np.isnan(p1) and p0 < p_near_surface:
-            return SURFACE
-        if np.isnan(p1) and np.isnan(p0) and state[i] == SURFACE:
-            return SURFACE
-        if np.isnan(p1) and p0 < dp_threshold * dp_latest:
-            return SURFACE
-        if np.isnan(p1) and p0 > p_near_surface:
-            return state[i]
-        if np.isnan(p0) and p1 > p_near_surface:
-            return state[i]
+        # Normal state transitions
         if p1 < p_near_surface:
-            return SURFACE
-        if p1 > p0:
-            return DIVING
-        if p1 < p0:
-            return CLIMBING
-        if p1 > 0 and np.isnan(p0) and state[i] == SURFACE:
-            return DIVING
-        if np.isclose(p0, p1):
-            return state[i]
-        raise RuntimeError(
-            f"Cannot determine state at i = {i}, p0 = {p0}, p1 = {p1}, state0 = {state[i]}, state1 = {state[i1]}"
-        )
+            output_state = SURFACE
+        elif p1 > p0:
+            output_state = DIVING
+        elif p1 < p0:
+            output_state = CLIMBING
+        elif np.isclose(p0, p1):
+            output_state = state[i]
+
+        if output_state is not None:
+            return output_state, dp_latest
+        else:
+            _log.debug(
+                "Handling NaN at i = %i, p0 = %1.3f, p1 = %1.3f, state = %i",
+                i,
+                p0,
+                p1,
+                state[i],
+            )
+
+        p1_is_nan = np.isnan(p1)
+        p0_is_nan = np.isnan(p0)
+
+        if p1_is_nan and p0 < p_near_surface:
+            output_state = SURFACE
+        elif p1_is_nan and p0_is_nan and state[i] == SURFACE:
+            output_state = SURFACE
+        elif p1_is_nan and p0 < dp_threshold * dp_latest:
+            output_state = SURFACE
+        elif p1 > 0 and p0_is_nan and state[i] == SURFACE:
+            output_state = DIVING
+        elif p1_is_nan and p0 > p_near_surface:
+            output_state = state[i]
+        elif p0_is_nan and p1 > p_near_surface:  # This skips a single NaN
+            output_state = state[i]
+        elif p0_is_nan and p[i + 2] > p_near_surface:  # This skips 2 NaNs mid profile
+            output_state = state[i]
+        elif p0_is_nan and p[i + 3] > p_near_surface:  # This skips 3 NaNs mid profile
+            output_state = state[i]
+
+        if output_state is None:
+            raise RuntimeError(
+                f"Cannot determine state at i = {i}, p0 = {p0}, p1 = {p1}, state0 = {state[i]}"
+            )
+        else:
+            return output_state, dp_latest
 
     def handle_mini_profiles(profile_type, state_value, reject_condition):
         regions = contiguous_regions(state == state_value)
@@ -114,14 +137,16 @@ def find_profiles_using_logic(
             dive_ids[regions[j, 0] :] -= 1
             climb_ids[regions[j, 1] :] -= 1
 
-    # Determine initial state
+    # Determine initial state and initalize
     state[0] = SURFACE if np.isclose(p[0], 0) else UNKNOWN
+    dive_id, climb_id = 0, 0
+    idx_dive_start, idx_dive_end = 0, 0
+    dp_latest = 0.0
 
     # Loop over pressure values
     for i in range(p.size - 1):
         i1 = i + 1
-        p0, p1 = p[i], p[i1]
-        state[i1] = update_state(i, i1, p0, p1)
+        state[i1], dp_latest = update_state(i, p, dp_latest, state)
 
         if state[i1] == DIVING and state[i] != DIVING:
             dive_id += 1

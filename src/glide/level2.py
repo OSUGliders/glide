@@ -75,8 +75,7 @@ def parse_l1(file: str | xr.Dataset) -> xr.Dataset:
     if isinstance(file, str):
         _log.debug("Parsing L1 %s", file)
         try:
-            ds = xr.open_dataset(file).drop_dims("j")
-            ds.close()  # TODO: check if needed... I am worried about locking the file
+            ds = xr.open_dataset(file, decode_timedelta=True).drop_dims("j").load()
             _log.debug("xarray.open_dataset opened %s", file)
         except ValueError:
             ds = pd.read_csv(file).to_xarray()
