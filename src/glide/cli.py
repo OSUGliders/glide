@@ -170,3 +170,20 @@ def hot(
     hotel_struct = hotel.create_structure(l2)
 
     hotel.save_hotel(hotel_struct, out_file)
+
+
+@app.command()
+def gps(
+    l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
+    out_file: Annotated[
+        str, typer.Option("--out", "-o", help="The output file.")
+    ] = "slocum.gps.csv",
+) -> None:
+    _log.debug("L2 file %s", l2_file)
+    _log.debug("Output file %s", out_file)
+
+    l2 = level3.parse_l2(l2_file)
+
+    gps = hotel.extract_gps(l2)
+
+    gps.to_dataframe().to_csv(out_file)

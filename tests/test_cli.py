@@ -38,3 +38,11 @@ def test_hot() -> None:
     result = runner.invoke(app, ["hot", l2_file, "-o", out_file])
 
     assert result.exit_code == 0
+
+
+def test_gps() -> None:
+    l2_file = str(resources.files("tests").joinpath("data/slocum.l2.nc"))
+    out_file = str(resources.files("tests").joinpath("data/slocum.gps.csv"))
+    result = runner.invoke(app, ["hot", l2_file, "-o", out_file])
+
+    assert result.exit_code == 0

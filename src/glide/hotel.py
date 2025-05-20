@@ -1,4 +1,4 @@
-# Functions for generating hotel files which are used in the MicroRider processing.
+# Functions for generating hotel and gps files which are used in the MicroRider processing.
 
 import xarray as xr
 from scipy.io import savemat
@@ -26,3 +26,7 @@ def create_structure(ds: xr.Dataset) -> dict:
 
 def save_hotel(hotel_struct: dict, out_file: str) -> None:
     savemat(out_file, hotel_struct)
+
+
+def extract_gps(ds: xr.Dataset) -> xr.Dataset:
+    return ds.get(["time", "lat", "lon"]).dropna("time")
