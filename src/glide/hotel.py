@@ -29,4 +29,4 @@ def save_hotel(hotel_struct: dict, out_file: str) -> None:
 
 
 def extract_gps(ds: xr.Dataset) -> xr.Dataset:
-    return ds.get(["time", "lat", "lon"]).dropna("time")
+    return ds[["lat", "lon"]].dropna("time")
