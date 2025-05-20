@@ -18,6 +18,7 @@ wheels/
 
 # Data
 *.nc
+*.mat
 
 # Notebooks
 *.ipynb

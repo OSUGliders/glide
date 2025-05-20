@@ -30,3 +30,11 @@ def test_l3() -> None:
     result = runner.invoke(app, ["l3", l2_file, "-o", out_file])
 
     assert result.exit_code == 0
+
+
+def test_hot() -> None:
+    l2_file = str(resources.files("tests").joinpath("data/slocum.l2.nc"))
+    out_file = str(resources.files("tests").joinpath("data/slocum.hotel.mat"))
+    result = runner.invoke(app, ["hot", l2_file, "-o", out_file])
+
+    assert result.exit_code == 0

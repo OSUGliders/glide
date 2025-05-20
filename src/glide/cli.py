@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 from typing_extensions import Annotated
 
-from . import config, level2, level3
+from . import config, level2, level3, hotel
 
 _log = logging.getLogger(__name__)
 
@@ -153,3 +153,20 @@ def l3(
         out = level3.bin_q(out, q_netcdf, bin_size, conf)
 
     out.to_netcdf(out_file)
+
+
+@app.command()
+def hot(
+    l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
+    out_file: Annotated[
+        str, typer.Option("--out", "-o", help="The output file.")
+    ] = "slocum.hotel.mat",
+) -> None:
+    _log.debug("L2 file %s", l2_file)
+    _log.debug("Output file %s", out_file)
+
+    l2 = level3.parse_l2(l2_file)
+
+    hotel_struct = hotel.create_structure(l2)
+
+    hotel.save_hotel(hotel_struct, out_file)
