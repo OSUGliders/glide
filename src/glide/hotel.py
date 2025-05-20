@@ -6,7 +6,7 @@ from scipy.io import savemat
 
 def create_structure(ds: xr.Dataset) -> dict:
     # Convert times to POSIX timestamps (seconds since epoch)
-    times_posix = ds["time"].values.astype('datetime64[s]').astype('int64')
+    times_posix = ds["time"].values.astype("datetime64[s]").astype("int64")
     structure = {
         "ctd_temp": {
             "time": times_posix,

@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 from typing_extensions import Annotated
 
-from . import config, level2, level3, hotel
+from . import config, hotel, level2, level3
 
 _log = logging.getLogger(__name__)
 
