@@ -16,10 +16,6 @@ def create_structure(ds: xr.Dataset) -> dict:
             "time": times_posix,
             "data": ds["conductivity"].values,
         },
-        "ctd_salt": {
-            "time": times_posix,
-            "data": ds["salinity"].values,
-        },
     }
     return structure
 
