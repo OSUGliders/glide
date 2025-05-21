@@ -47,6 +47,18 @@ glide --help
 glide l2 --help
 ```
 
+To create a hotel file
+
+```
+glide hot glidername.l2.nc -o glidername.hot.mat
+```
+
+To extract the valid or interpolated location data into a CSV file
+
+```
+glide gps glidername.l2.nc -o glidername.gps.csv
+```
+
 ## Quality controls
 
 We currently apply the following QC during L1 -> L2 processing:
