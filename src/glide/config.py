@@ -2,12 +2,12 @@
 
 import logging
 
-from yaml import safe_load
+from yaml import safe_load_all
 
 _log = logging.getLogger(__name__)
 
 
-def load_config(file: str | None = None) -> tuple[dict, dict]:
+def load_config(file: str | None = None) -> dict:
     """Extract variable specifications from a yaml file."""
     if file is None:
         from importlib import resources
@@ -15,17 +15,26 @@ def load_config(file: str | None = None) -> tuple[dict, dict]:
         file = str(resources.files("glide").joinpath("assets/config.yml"))
 
     with open(file) as f:
-        config = safe_load(f)
+        # Documents in yaml are defined by: ---
+        docs = [doc for doc in safe_load_all(f)]
+
+    global_config = docs[0]
+    variable_specs = docs[1]
 
     # Generate mapping from Slocum source name to dataset name
-    name_map = {
-        sn: name
-        for name, specs in config.items()
+    slocum_name_map = {
+        source: variable_name
+        for variable_name, specs in variable_specs.items()
         if "source" in specs
-        for sn in (
+        for source in (
             specs["source"] if isinstance(specs["source"], list) else [specs["source"]]
         )
     }
 
-    _log.debug("Name mapping dict %s", name_map)
-    return config, name_map
+    _log.debug("Slocum name mapping dict %s", slocum_name_map)
+
+    config = dict(
+        globals=global_config, variables=variable_specs, slocum=slocum_name_map
+    )
+
+    return config

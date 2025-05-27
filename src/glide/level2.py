@@ -15,27 +15,41 @@ from . import qc
 _log = logging.getLogger(__name__)
 
 
+def parse_config_arg(config: dict | str | None = None) -> dict:
+    if isinstance(config, dict):
+        pass
+    elif isinstance(config, str):
+        from .config import load_config
+
+        config = load_config(config)
+    elif config is None:
+        from .config import load_config
+
+        config = load_config()
+    else:
+        raise ValueError(
+            "config must be configuration dictionary, or string defining the config file path, or None."
+        )
+
+    return config
+
+
 def format_variables(
     ds: xr.Dataset,
-    config: dict | None = None,
-    name_map: dict | None = None,
-    config_file: str | None = None,
+    config: dict | str | None = None,
 ) -> xr.Dataset:
     """Formats time series variables following the instructions in the variable specification file.
     Drops variables that are not in the file."""
 
-    if config is None or name_map is None:
-        from .config import load_config
-
-        config, name_map = load_config(config_file)
+    config = parse_config_arg(config)
 
     _log.debug("Formatting variables")
     reduced_name_map = {
-        var: name for var, name in name_map.items() if var in ds.variables
+        var: name for var, name in config["slocum"].items() if var in ds.variables
     }
     for var, name in reduced_name_map.items():
         _log.debug("Formatting variable %s", var)
-        specs = config[name]
+        specs = config["variables"][name]
 
         if "conversion" in specs:
             _log.debug("Converting %s using %s", var, specs["conversion"])
@@ -54,7 +68,7 @@ def format_variables(
         ds = ds.rename({var: name})
 
     # Drop variables that are not in the specs file.
-    remaining_vars = set(ds.keys()) - set(config.keys())
+    remaining_vars = set(ds.keys()) - set(config["variables"].keys())
     ds = ds.drop_vars(remaining_vars)
 
     _log.debug("Variables remaining in dataset %s", list(ds.keys()))
@@ -69,8 +83,7 @@ def fix_time_varaiable_conflict(ds: xr.Dataset) -> xr.Dataset:
 
 
 def parse_l1(file: str | xr.Dataset) -> xr.Dataset:
-    """Parses flight (sbd) or science (tbd) data processed by dbd2netcdf or dbd2csv.
-    Applies IOOS glider DAC attributes."""
+    """Parses flight (sbd) or science (tbd) data processed by dbd2netcdf or dbd2csv."""
 
     if isinstance(file, str):
         _log.debug("Parsing L1 %s", file)
@@ -90,20 +103,15 @@ def parse_l1(file: str | xr.Dataset) -> xr.Dataset:
 
 def apply_qc(
     ds: xr.Dataset,
-    config: dict | None = None,
-    name_map: dict | None = None,
-    config_file: str | None = None,
+    config: dict | str | None = None,
 ) -> xr.Dataset:
     """The standard suite of L2 QC."""
 
-    if config is None or name_map is None:
-        from .config import load_config
-
-        config, name_map = load_config(config_file)
+    config = parse_config_arg(config)
 
     ds = fix_time_varaiable_conflict(ds)
 
-    ds = format_variables(ds, config, name_map)
+    ds = format_variables(ds, config)
 
     ds = qc.init_qc(ds, config)
 
@@ -139,16 +147,12 @@ def merge(
     flt: xr.Dataset,
     sci: xr.Dataset,
     times_from: str = "science",
-    config: dict | None = None,
-    config_file: str | None = None,
+    config: dict | str | None = None,
 ) -> xr.Dataset:
     """Merge flight and science variables onto a common time vector.
     The science time vector is used by default."""
 
-    if config is None:
-        from .config import load_config
-
-        config, _ = load_config(config_file)
+    config = parse_config_arg(config)
 
     if times_from == "science":
         time_interpolant = sci.time
@@ -199,42 +203,44 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
 
     dims = ds.conductivity.dims
 
+    variable_specs = config["variables"]
+
     salinity = gsw.SP_from_C(
         conv.spm_to_mspcm(ds.conductivity), ds.temperature, ds.pressure
     )
-    ds["salinity"] = (dims, salinity.values, config["salinity"]["CF"])
+    ds["salinity"] = (dims, salinity.values, variable_specs["salinity"]["CF"])
 
     lon = ds.lon.interpolate_na("time")
     lat = ds.lat.interpolate_na("time")
     SA = gsw.SA_from_SP(ds.salinity, ds.pressure, lon, lat)
-    ds["SA"] = (dims, SA.values, config["SA"]["CF"])
+    ds["SA"] = (dims, SA.values, variable_specs["SA"]["CF"])
 
     density = gsw.rho_t_exact(ds.SA, ds.temperature, ds.pressure)
-    ds["density"] = (dims, density.values, config["density"]["CF"])
+    ds["density"] = (dims, density.values, variable_specs["density"]["CF"])
 
     rho0 = gsw.pot_rho_t_exact(ds.SA, ds.temperature, ds.pressure, 0)
-    ds["rho0"] = (dims, rho0.values, config["rho0"]["CF"])
+    ds["rho0"] = (dims, rho0.values, variable_specs["rho0"]["CF"])
 
     CT = gsw.CT_from_t(ds.SA, ds.temperature, ds.pressure)
-    ds["CT"] = (dims, CT.values, config["CT"]["CF"])
+    ds["CT"] = (dims, CT.values, variable_specs["CT"]["CF"])
 
     # Initialize quality control
-    variables = ["salinity", "SA", "density", "rho0", "CT"]
-    ds = qc.init_qc(ds, config, variables, ds.conductivity_qc.values)
-    ds = qc.apply_bounds(ds, variables)
+    new_variables = ["salinity", "SA", "density", "rho0", "CT"]
+    ds = qc.init_qc(ds, config, new_variables, ds.conductivity_qc.values)
+    ds = qc.apply_bounds(ds, new_variables)
 
     z = gsw.z_from_p(ds.pressure, lat)
-    ds["z"] = (dims, z.values, config["z"]["CF"])
-    ds["depth"] = (dims, -z.values, config["depth"]["CF"])
+    ds["z"] = (dims, z.values, variable_specs["z"]["CF"])
+    ds["depth"] = (dims, -z.values, variable_specs["depth"]["CF"])
 
-    variables = ["z", "depth"]
-    ds = qc.init_qc(ds, config, variables, ds.pressure_qc.values)
+    new_variables = ["z", "depth"]
+    ds = qc.init_qc(ds, config, new_variables, ds.pressure_qc.values)
 
     N2, _ = gsw.Nsquared(ds.SA, ds.CT, ds.pressure, ds.lat)
     # Try interpolating N2 back onto positions of data.
     # This does have the effect of low-pass filtering.
     N2 = xr.DataArray(N2, {"time": conv.mid(ds.time)})
-    ds["N2"] = (dims, N2.interp(time=ds.time).values, config["N2"]["CF"])
+    ds["N2"] = (dims, N2.interp(time=ds.time).values, variable_specs["N2"]["CF"])
     ds = qc.init_qc_variable(ds, "N2")
 
     return ds

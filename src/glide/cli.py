@@ -34,7 +34,7 @@ def l1b(
         typer.Option(
             "--config",
             "-c",
-            help="Processed variables are specified in this YAML file.",
+            help="Processing configuration is specified in this YAML file.",
         ),
     ] = None,
 ) -> None:
@@ -42,11 +42,11 @@ def l1b(
     _log.debug("Output file %s", out_file)
     _log.debug("Config file %s", config_file)
 
-    conf, name_map = config.load_config(config_file)
+    conf = config.load_config(config_file)
 
     out = level2.parse_l1(file)
 
-    out = level2.apply_qc(out, conf, name_map)
+    out = level2.apply_qc(out, conf)
 
     out.to_netcdf(out_file)
 
@@ -63,7 +63,7 @@ def l2(
         typer.Option(
             "--config",
             "-c",
-            help="Processed variables are specified in this YAML file.",
+            help="Processing configuration is specified in this YAML file.",
         ),
     ] = None,
     output_extras: Annotated[
@@ -89,13 +89,13 @@ def l2(
     _log.debug("Output file %s", out_file)
     _log.debug("Config file %s", config_file)
 
-    conf, name_map = config.load_config(config_file)
+    conf = config.load_config(config_file)
 
     flt = level2.parse_l1(flt_file)
     sci = level2.parse_l1(sci_file)
 
-    flt = level2.apply_qc(flt, conf, name_map)
-    sci = level2.apply_qc(sci, conf, name_map)
+    flt = level2.apply_qc(flt, conf)
+    sci = level2.apply_qc(sci, conf)
 
     if output_extras:
         out_dir = Path(out_file).parent
@@ -135,7 +135,7 @@ def l3(
         typer.Option(
             "--config",
             "-c",
-            help="Processed variables are specified in this YAML file.",
+            help="Processing configuration is specified in this YAML file.",
         ),
     ] = None,
 ) -> None:
@@ -149,7 +149,7 @@ def l3(
     out = level3.bin_l2(l2, bin_size)
 
     if q_netcdf is not None:
-        conf, _ = config.load_config(config_file)
+        conf = config.load_config(config_file)
         out = level3.bin_q(out, q_netcdf, bin_size, conf)
 
     out.to_netcdf(out_file)

@@ -165,11 +165,11 @@ def apply_bounds(ds: xr.Dataset, variables: Iterable | str | None = None) -> xr.
 
 def interpolate_missing(ds: xr.Dataset, config: dict) -> xr.Dataset:
     _log.debug("Interpolating missing data")
-    for v in ds.data_vars:
-        if v not in config:
+    for variable in ds.data_vars:
+        if variable not in config["variables"]:
             continue
 
-        specs = config[v]
+        specs = config["variables"][variable]
         if "interpolate_missing" not in specs:
             continue
         if not specs["interpolate_missing"]:
@@ -177,16 +177,16 @@ def interpolate_missing(ds: xr.Dataset, config: dict) -> xr.Dataset:
 
         max_gap = specs["max_gap"] if "max_gap" in specs else 60
 
-        _log.debug("Interpolating %s with max gap %s", v, max_gap)
+        _log.debug("Interpolating %s with max gap %s", variable, max_gap)
 
-        original = ds[v].values.copy()
+        original = ds[variable].values.copy()
 
-        ds[v] = ds[v].interpolate_na(dim="time", max_gap=max_gap)
+        ds[variable] = ds[variable].interpolate_na(dim="time", max_gap=max_gap)
 
         # Update QC
-        changed, _ = changed_elements(original, ds[v])
+        changed, _ = changed_elements(original, ds[variable])
         _log.debug("%i elements changed of %i total", changed.sum(), changed.size)
-        ds = update_qc_flag(ds, str(v), 8, changed)
+        ds = update_qc_flag(ds, str(variable), 8, changed)
 
     return ds
 
@@ -383,18 +383,18 @@ def init_qc(
     elif type(variables) is str:
         return init_qc_variable(ds, variables, flag_values)
 
-    for v in variables:
-        v = str(v)
-        if v not in config:
+    for variable in variables:
+        variable = str(variable)
+        if variable not in config["variables"]:
             continue
 
-        specs = config[v]
+        specs = config["variables"][variable]
         if "track_qc" not in specs:
             continue
         if not specs["track_qc"]:
             continue
 
-        ds = init_qc_variable(ds, v, flag_values)
+        ds = init_qc_variable(ds, variable, flag_values)
 
     return ds
 
