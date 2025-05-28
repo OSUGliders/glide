@@ -117,6 +117,9 @@ def apply_qc(
     ds = ds.dropna(dim, how="all")
     _log.debug("After dropna, %i points along dim %s", ds.sizes[dim], dim)
 
+    # Drop all unlimited dimensions that might be leftover from dbd2netcdf
+    ds.encoding["unlimited_dims"] = {}
+
     return ds
 
 
@@ -152,7 +155,7 @@ def merge(
             continue
 
         try:  # Only drop variables if the flag is explicitly set
-            drop = config[v]["drop_from_l2"]
+            drop = config["variables"][v]["drop_from_l2"]
             if drop:
                 _log.debug("Not interpolating %s due to drop_from_l2 flag in specs", v)
                 continue
