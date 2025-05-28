@@ -1,10 +1,21 @@
+# glide configuration is specified in this file. 
 # Variable formatting follows national gdlier DAC netCDF format version 2
 # https://ioos.github.io/glider-dac/ngdac-netcdf-file-format-version-2
+
+# Dashes indicate separate yaml documents. The ordering of documents is important. 
+
+--- ### PART 1 GLOBAL CONFIGURATION
+
+time_start: 2000-01-01T00:00:00
+time_end: 2040-01-01T00:00:00
+
+--- ### PART 2 VARIABLE DEFINITIONS, QC CONTROLS, AND METADATA
 
 # TIME VARIABLES
 
 time: # This is the name the we want
   # This list of sources can only be done for variables that do not appear in the same file
+  # because we are essentially mapping one variable name, time, to two other variable names.
   source: ["m_present_time", "sci_m_present_time"]
   track_qc: True
   # conversion: posix_to_datetime
@@ -15,6 +26,8 @@ time: # This is the name the we want
     units: seconds since 1970-01-01T00:00:00Z
     axis: T
     observation_type: "measured"
+    valid_min: 2000-01-01T00:00:00
+    valid_max: 2040-01-01T00:00:00
 
 # FLIGHT VARIABLES
 
@@ -304,6 +317,8 @@ z:
     reference_datum: "sea-surface"
     instrument: "instrument_ctd"
     observation_type: "calculated"
+
+# ASSIMILATED VARIABLES
 
 e_1: 
   CF: 

@@ -13,7 +13,8 @@ _log = logging.getLogger(__name__)
 
 def nan_out_of_bounds(y: ArrayLike, y_min: float, y_max: float) -> NDArray:
     y = np.asarray(y)
-    y[(y < y_min) | (y > y_max)] = np.nan
+    invalid = (y < y_min) | (y > y_max)
+    y[invalid] = np.nan
     return y
 
 
@@ -165,11 +166,11 @@ def apply_bounds(ds: xr.Dataset, variables: Iterable | str | None = None) -> xr.
 
 def interpolate_missing(ds: xr.Dataset, config: dict) -> xr.Dataset:
     _log.debug("Interpolating missing data")
-    for v in ds.data_vars:
-        if v not in config:
+    for variable in ds.data_vars:
+        if variable not in config["variables"]:
             continue
 
-        specs = config[v]
+        specs = config["variables"][variable]
         if "interpolate_missing" not in specs:
             continue
         if not specs["interpolate_missing"]:
@@ -177,16 +178,16 @@ def interpolate_missing(ds: xr.Dataset, config: dict) -> xr.Dataset:
 
         max_gap = specs["max_gap"] if "max_gap" in specs else 60
 
-        _log.debug("Interpolating %s with max gap %s", v, max_gap)
+        _log.debug("Interpolating %s with max gap %s", variable, max_gap)
 
-        original = ds[v].values.copy()
+        original = ds[variable].values.copy()
 
-        ds[v] = ds[v].interpolate_na(dim="time", max_gap=max_gap)
+        ds[variable] = ds[variable].interpolate_na(dim="time", max_gap=max_gap)
 
         # Update QC
-        changed, _ = changed_elements(original, ds[v])
+        changed, _ = changed_elements(original, ds[variable])
         _log.debug("%i elements changed of %i total", changed.sum(), changed.size)
-        ds = update_qc_flag(ds, str(v), 8, changed)
+        ds = update_qc_flag(ds, str(variable), 8, changed)
 
     return ds
 
@@ -194,26 +195,11 @@ def interpolate_missing(ds: xr.Dataset, config: dict) -> xr.Dataset:
 def time(
     ds: xr.Dataset,
     time_var: str = "time",
-    time_bounds: tuple[float, float] = (946684800, 2208988800),
 ) -> xr.Dataset:
-    """Apply time thresholds, remove all NaT data, keep only unique times.
-    The default thresholds are timestamps:
-    1577808000 = 2000-01-01T00:00:00
-    2208960000 = 2040-01-01T00:00:00
-    """
-    t0, t1 = time_bounds
-    _log.debug(
-        "Removing times outside %s to %s",
-        pd.to_datetime(t0, unit="s"),
-        pd.to_datetime(t1, unit="s"),
-    )
+    """Remove all NaT data and keep only unique times."""
 
     dim = ds[time_var].dims[0]
-    ds[time_var] = (
-        dim,
-        nan_out_of_bounds(ds[time_var], t0, t1),
-        ds[time_var].attrs,
-    )
+
     good = np.isfinite(ds[time_var])
     _log.debug(
         "%s contains %i good points of %i total",
@@ -231,6 +217,15 @@ def time(
         ds[time_var].size,
     )
     ds = ds.isel({dim: idx})
+
+    valid_min = ds[time_var].attrs["valid_min"]
+    ds[time_var].attrs["valid_min"] = pd.to_datetime(valid_min, unit="s").strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
+    valid_max = ds[time_var].attrs["valid_max"]
+    ds[time_var].attrs["valid_max"] = pd.to_datetime(valid_max, unit="s").strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
 
     # After this we are pretty confident in the times
     ds = update_qc_flag(ds, time_var, 2, np.full(ds[time_var].shape, True))
@@ -383,18 +378,18 @@ def init_qc(
     elif type(variables) is str:
         return init_qc_variable(ds, variables, flag_values)
 
-    for v in variables:
-        v = str(v)
-        if v not in config:
+    for variable in variables:
+        variable = str(variable)
+        if variable not in config["variables"]:
             continue
 
-        specs = config[v]
+        specs = config["variables"][variable]
         if "track_qc" not in specs:
             continue
         if not specs["track_qc"]:
             continue
 
-        ds = init_qc_variable(ds, v, flag_values)
+        ds = init_qc_variable(ds, variable, flag_values)
 
     return ds
 
