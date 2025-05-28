@@ -126,7 +126,11 @@ def bin_q(ds: xr.Dataset, q_netcdf: str, bin_size: float, config: dict) -> xr.Da
 
     dissipation_variables = ["e_1", "e_2"]
     for v in dissipation_variables:
-        ds[v] = (dims, np.full_like(ds.conductivity.values, np.nan), config[v]["CF"])
+        ds[v] = (
+            dims,
+            np.full_like(ds.conductivity.values, np.nan),
+            config["variables"][v]["CF"],
+        )
         # Convert from log
         eds[v] = (eds[v].dims, 10 ** eds[v].values)
 

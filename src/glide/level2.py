@@ -15,33 +15,12 @@ from . import qc
 _log = logging.getLogger(__name__)
 
 
-def parse_config_arg(config: dict | str | None = None) -> dict:
-    if isinstance(config, dict):
-        pass
-    elif isinstance(config, str):
-        from .config import load_config
-
-        config = load_config(config)
-    elif config is None:
-        from .config import load_config
-
-        config = load_config()
-    else:
-        raise ValueError(
-            "config must be configuration dictionary, or string defining the config file path, or None."
-        )
-
-    return config
-
-
 def format_variables(
     ds: xr.Dataset,
-    config: dict | str | None = None,
+    config: dict,
 ) -> xr.Dataset:
     """Formats time series variables following the instructions in the variable specification file.
     Drops variables that are not in the file."""
-
-    config = parse_config_arg(config)
 
     _log.debug("Formatting variables")
     reduced_name_map = {
@@ -103,11 +82,9 @@ def parse_l1(file: str | xr.Dataset) -> xr.Dataset:
 
 def apply_qc(
     ds: xr.Dataset,
-    config: dict | str | None = None,
+    config: dict,
 ) -> xr.Dataset:
     """The standard suite of L2 QC."""
-
-    config = parse_config_arg(config)
 
     ds = fix_time_varaiable_conflict(ds)
 
@@ -146,13 +123,11 @@ def apply_qc(
 def merge(
     flt: xr.Dataset,
     sci: xr.Dataset,
+    config: dict,
     times_from: str = "science",
-    config: dict | str | None = None,
 ) -> xr.Dataset:
     """Merge flight and science variables onto a common time vector.
     The science time vector is used by default."""
-
-    config = parse_config_arg(config)
 
     if times_from == "science":
         time_interpolant = sci.time
@@ -200,6 +175,8 @@ def merge(
 
 def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     """Should be applied after merging flight and science."""
+
+    _log.debug("Calculating thermodynamics")
 
     dims = ds.conductivity.dims
 
