@@ -41,7 +41,6 @@ time: # This is the name the we want
   # because we are essentially mapping one variable name, time, to two other variable names.
   source: ["m_present_time", "sci_m_present_time"]
   track_qc: True
-  # conversion: posix_to_datetime
   CF: # CF attributes here
     long_name: Time
     standard_name: time
