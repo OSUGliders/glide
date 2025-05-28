@@ -114,6 +114,8 @@ def l2(
 
     out = level2.get_profiles(merged, p_near_surface, dp_threshold)
 
+    out = level2.enforce_types(out, conf)
+
     # Apply global netCDF attributes
     out.attrs = conf["globals"]["netcdf_attributes"]
 
