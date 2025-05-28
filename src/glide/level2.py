@@ -246,3 +246,16 @@ def get_profiles(
         ),
     )
     return ds
+
+
+def enforce_types(ds: xr.Dataset, config: dict) -> xr.Dataset:
+    variable_specs = {
+        var: specs
+        for var, specs in config["variables"].items()
+        if var in ds.variables and "dtype" in specs
+    }
+
+    for var, specs in variable_specs.items():
+        ds[var] = ds[var].astype(specs["dtype"])
+
+    return ds

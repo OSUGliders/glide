@@ -15,7 +15,7 @@ _log = logging.getLogger(__name__)
 
 def parse_l2(l2_file: str) -> xr.Dataset:
     """Parse the level 2 data."""
-    return xr.open_dataset(l2_file)
+    return xr.open_dataset(l2_file).load()
 
 
 def get_profile_indexes(ds: xr.Dataset) -> NDArray:
@@ -40,13 +40,20 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
 
     idxs = get_profile_indexes(ds)
 
-    s = ds.state.copy()
-    z_attrs = ds.z.attrs
-
-    # Drop some variables
+    # Drop some variables but same some attributes
     qc_variables = [v for v in ds.variables if "_qc" in str(v)]
     drop_variables = qc_variables + ["dive_id", "climb_id", "state", "z"]
     _log.warning("Binning QC flags is not supported, dropping %s", drop_variables)
+    for var in ds.variables:
+        if "ancillary_variables" not in ds[var].attrs:
+            continue
+        if ds[var].attrs["ancillary_variables"] in qc_variables:
+            ds[var].attrs.pop("ancillary_variables")
+
+    s = ds.state.copy()
+    z_attrs = ds.z.attrs.copy()
+    time_attrs = ds.time.attrs.copy()
+
     ds = ds.drop_vars(drop_variables)
 
     binned_profiles = []
@@ -57,29 +64,29 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
     profile_time_start = []
     profile_time_end = []
 
+    ds["time"] = ds.time.astype("f8") / 1e9  # Convert to seconds posix
+    time_attrs["units"] = "seconds since 1970-01-01T00:00:00"
+
     for row in idxs:
         state.append(s.values[row[0]])
         profile = ds.isel(time=slice(row[0], row[1]))
 
-        profile_time_start.append(profile.time[0].values)
-        profile_time_end.append(profile.time[-1].values)
+        # Store profile timing and position
+        time = profile.time.values
+        profile_time_start.append(time[0])
+        profile_time_end.append(time[-1])
+        idx_mid = np.searchsorted(time, 0.5 * (time[0] + time[-1]))
+        profile_time.append(time[idx_mid])
+        profile_lat.append(profile.lat.values[idx_mid])
+        profile_lon.append(profile.lon.values[idx_mid])
 
-        idx_mid = len(profile.time) // 2
-        time_mid = profile.time.values[idx_mid]
-        profile_time.append(time_mid)
-        profile_lat.append(profile.lat.sel(time=time_mid, method="nearest"))
-        profile_lon.append(profile.lon.sel(time=time_mid, method="nearest"))
-
-        # Some type juggling is required to properly bin time
+        # Some juggling is required to properly bin time
+        # Make a new variable i
         profile["i"] = ("time", np.arange(len(profile.time)))
+        # Make i the coordinate and swap time to a variable
         profile = profile.swap_dims({"time": "i"}).reset_coords("time")
-        profile["time"] = ("i", profile.time.data.astype(float), profile.time.attrs)
+        profile["time"].attrs = time_attrs
         binned = profile.groupby_bins("depth", depth_bins).mean()
-        binned["time"] = (
-            "depth_bins",
-            binned.time.data.astype("M8[ns]"),
-            binned.time.attrs,
-        )
 
         binned["depth_bins"] = [db.mid for db in binned.depth_bins.values]
         binned_profiles.append(binned)
@@ -94,10 +101,18 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
     ds_binned["z"] = ("depth", -ds_binned.depth.values, z_attrs)
     ds_binned = ds_binned.swap_dims({"depth": "z"}).set_coords("z")
 
-    ds_binned["state"] = (("profile",), state)
-    ds_binned["profile_time"] = (("profile",), profile_time)
-    ds_binned["profile_time_start"] = (("profile",), profile_time_start)
-    ds_binned["profile_time_end"] = (("profile",), profile_time_end)
+    ds_binned["state"] = (
+        ("profile",),
+        state,
+        dict(
+            long_name="Glider state",
+            flag_values=np.array([1, 2]).astype("i1"),
+            flag_meanings="diving climbing",
+        ),
+    )
+    ds_binned["profile_time"] = (("profile",), profile_time, time_attrs)
+    ds_binned["profile_time_start"] = (("profile",), profile_time_start, time_attrs)
+    ds_binned["profile_time_end"] = (("profile",), profile_time_end, time_attrs)
     ds_binned["profile_lat"] = (("profile",), profile_lat)
     ds_binned["profile_lon"] = (("profile",), profile_lon)
 
