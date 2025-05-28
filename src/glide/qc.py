@@ -13,7 +13,8 @@ _log = logging.getLogger(__name__)
 
 def nan_out_of_bounds(y: ArrayLike, y_min: float, y_max: float) -> NDArray:
     y = np.asarray(y)
-    y[(y < y_min) | (y > y_max)] = np.nan
+    invalid = (y < y_min) | (y > y_max)
+    y[invalid] = np.nan
     return y
 
 
@@ -194,26 +195,11 @@ def interpolate_missing(ds: xr.Dataset, config: dict) -> xr.Dataset:
 def time(
     ds: xr.Dataset,
     time_var: str = "time",
-    time_bounds: tuple[float, float] = (946684800, 2208988800),
 ) -> xr.Dataset:
-    """Apply time thresholds, remove all NaT data, keep only unique times.
-    The default thresholds are timestamps:
-    1577808000 = 2000-01-01T00:00:00
-    2208960000 = 2040-01-01T00:00:00
-    """
-    t0, t1 = time_bounds
-    _log.debug(
-        "Removing times outside %s to %s",
-        pd.to_datetime(t0, unit="s"),
-        pd.to_datetime(t1, unit="s"),
-    )
+    """Remove all NaT data and keep only unique times."""
 
     dim = ds[time_var].dims[0]
-    ds[time_var] = (
-        dim,
-        nan_out_of_bounds(ds[time_var], t0, t1),
-        ds[time_var].attrs,
-    )
+
     good = np.isfinite(ds[time_var])
     _log.debug(
         "%s contains %i good points of %i total",
@@ -231,6 +217,15 @@ def time(
         ds[time_var].size,
     )
     ds = ds.isel({dim: idx})
+
+    valid_min = ds[time_var].attrs["valid_min"]
+    ds[time_var].attrs["valid_min"] = pd.to_datetime(valid_min, unit="s").strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
+    valid_max = ds[time_var].attrs["valid_max"]
+    ds[time_var].attrs["valid_max"] = pd.to_datetime(valid_max, unit="s").strftime(
+        "%Y-%m-%dT%H:%M:%S"
+    )
 
     # After this we are pretty confident in the times
     ds = update_qc_flag(ds, time_var, 2, np.full(ds[time_var].shape, True))

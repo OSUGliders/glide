@@ -2,6 +2,7 @@
 
 import logging
 
+import numpy as np
 from yaml import safe_load_all
 
 _log = logging.getLogger(__name__)
@@ -32,6 +33,16 @@ def load_config(file: str | None = None) -> dict:
     }
 
     _log.debug("Slocum name mapping dict %s", slocum_name_map)
+
+    # parse datetime in time valid_min and valid_max
+    if "valid_min" in variable_specs["time"]["CF"]:
+        variable_specs["time"]["CF"]["valid_min"] = variable_specs["time"]["CF"][
+            "valid_min"
+        ].timestamp()
+    if "valid_max" in variable_specs["time"]["CF"]:
+        variable_specs["time"]["CF"]["valid_max"] = variable_specs["time"]["CF"][
+            "valid_max"
+        ].timestamp()
 
     config = dict(
         globals=global_config, variables=variable_specs, slocum=slocum_name_map

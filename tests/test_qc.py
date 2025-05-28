@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 import glide.qc as qc
@@ -178,12 +179,13 @@ def test_time() -> None:
             "foo": (
                 "i",
                 [1739052713, 1739052713, float("NaN"), 1739052715, 43324210293429],
+                dict(valid_min=946684800, valid_max=2208988800),
             ),
         }
     )
     ds = qc.time(ds, "foo")
-    assert ds.foo.size == 2
-    assert list(ds.foo.values) == [1739052713, 1739052715]
+    assert ds.foo.size == 3
+    assert list(ds.foo.values) == [1739052713, 1739052715, 43324210293429]
 
 
 def test_gps() -> None:

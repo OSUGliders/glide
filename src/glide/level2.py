@@ -115,14 +115,14 @@ def apply_qc(
 
     ds = qc.init_qc(ds, config)
 
+    ds = qc.apply_bounds(ds)
+
     ds = qc.time(ds)
 
     # Make time the coordinate.
     dim = list(ds.sizes.keys())[0]  # Assume 1D dataset
     _log.debug("Swapping dimension %s for time", dim)
     ds = ds.swap_dims({dim: "time"})
-
-    ds = qc.apply_bounds(ds)
 
     # Apply gps QC, will only work on flight data
     try:
