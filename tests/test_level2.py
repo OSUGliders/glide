@@ -4,6 +4,7 @@ import pandas as pd
 import xarray as xr
 
 import glide.level2 as l2
+from glide.config import load_config
 
 
 def get_test_data(sn: str = "684", ftype: str = "sbd") -> xr.Dataset:
@@ -15,10 +16,11 @@ def get_test_data(sn: str = "684", ftype: str = "sbd") -> xr.Dataset:
 
 
 def test_format_variables() -> None:
-    sbd = l2.format_variables(get_test_data("684", "sbd"))
+    config = load_config()
+    sbd = l2.format_variables(get_test_data("684", "sbd"), config)
     assert hasattr(sbd, "time")
     assert hasattr(sbd.time, "units")
-    tbd = l2.format_variables(get_test_data("684", "tbd"))
+    tbd = l2.format_variables(get_test_data("684", "tbd"), config)
     assert hasattr(tbd, "time")
     assert hasattr(tbd.time, "units")
 

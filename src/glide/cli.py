@@ -103,7 +103,7 @@ def l2(
         flt.to_netcdf(Path(out_dir, "flt.nc"))
         sci.to_netcdf(Path(out_dir, "sci.nc"))
 
-    merged = level2.merge(flt, sci, "science", conf)
+    merged = level2.merge(flt, sci, conf, "science")
 
     merged = level2.calculate_thermodynamics(merged, conf)
 
@@ -113,6 +113,9 @@ def l2(
         merged.to_netcdf(Path(out_dir, "merged.nc"))
 
     out = level2.get_profiles(merged, p_near_surface, dp_threshold)
+
+    # Apply global netCDF attributes
+    out.attrs = conf["globals"]["netcdf_attributes"]
 
     out.to_netcdf(out_file)
 

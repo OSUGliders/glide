@@ -2,7 +2,6 @@
 
 import logging
 
-import numpy as np
 from yaml import safe_load_all
 
 _log = logging.getLogger(__name__)
