@@ -91,9 +91,7 @@ def _apply_bounds_variable(ds: xr.Dataset, variable: str) -> xr.Dataset:
     y = ds[variable]
 
     if "valid_min" not in y.attrs or "valid_max" not in y.attrs:
-        _log.debug(
-            "%s has no valid_min or valid_max attribute, skipping", variable
-        )
+        _log.debug("%s has no valid_min or valid_max attribute, skipping", variable)
         return ds
 
     vmin = y.attrs["valid_min"]
