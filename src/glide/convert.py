@@ -32,7 +32,8 @@ def mid(x: ArrayLike) -> NDArray:
     return x[:-1] + 0.5 * (x[1:] - x[:-1])
 
 
-def c_to_e(x) -> NDArray:
+def c_to_e(x: ArrayLike) -> NDArray:
     """Estimate grid edges from center points. Works with datetimes."""
     xm = mid(x)
+    x = np.asarray(x)
     return np.hstack((xm[0] - (x[1] - x[0]), xm, xm[-1] + (x[-1] - x[-2])))

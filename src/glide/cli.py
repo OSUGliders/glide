@@ -1,16 +1,48 @@
 # The command line interface entry point for glide.
 
+import functools
+import inspect
 import logging
 from pathlib import Path
 
 import typer
 from typing_extensions import Annotated
 
-from . import config, hotel, level2, level3
+from . import config, hotel, process_l1, process_l2
 
 _log = logging.getLogger(__name__)
 
 app = typer.Typer()
+
+
+def log_args(func):
+    """Decorator to log all argument names and values to a function using the logging module."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        sig = inspect.signature(func)
+        bound = sig.bind(*args, **kwargs)
+        bound.apply_defaults()
+        _log.debug("Calling %s", func.__name__)
+        for name, value in bound.arguments.items():
+            _log.debug("  %s = %r", name, value)
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+# Commonly used argument annotations
+_config_annotation = Annotated[
+    str | None,
+    typer.Option(
+        "--config",
+        "-c",
+        help="Processing configuration is specified in this YAML file.",
+    ),
+]
+_out_file_annotation = Annotated[
+    str, typer.Option("--out", "-o", help="The output file.")
+]
 
 
 @app.callback()
@@ -24,48 +56,28 @@ def main(log_level: str = "WARN"):
 
 
 @app.command()
+@log_args
 def l1b(
     file: Annotated[str, typer.Argument(help="The sbd/tbd/dbd/ebd data file.")],
-    out_file: Annotated[
-        str, typer.Option("--out", "-o", help="The output file.")
-    ] = "slocum.l1b.nc",
-    config_file: Annotated[
-        str | None,
-        typer.Option(
-            "--config",
-            "-c",
-            help="Processing configuration is specified in this YAML file.",
-        ),
-    ] = None,
+    out_file: _out_file_annotation = "slocum.l1b.nc",
+    config_file: _config_annotation = None,
 ) -> None:
-    _log.debug("Input file %s", file)
-    _log.debug("Output file %s", out_file)
-    _log.debug("Config file %s", config_file)
-
     conf = config.load_config(config_file)
 
-    out = level2.parse_l1(file)
+    ds = process_l1.parse_l1(file, conf)
 
-    out = level2.apply_qc(out, conf)
+    ds = process_l1.apply_qc(ds, conf)
 
-    out.to_netcdf(out_file)
+    ds.to_netcdf(out_file)
 
 
 @app.command()
+@log_args
 def l2(
     flt_file: Annotated[str, typer.Argument(help="The flight (dbd/sbd) data file.")],
     sci_file: Annotated[str, typer.Argument(help="The science (ebd/tbd) data file.")],
-    out_file: Annotated[
-        str, typer.Option("--out", "-o", help="The output file.")
-    ] = "slocum.l2.nc",
-    config_file: Annotated[
-        str | None,
-        typer.Option(
-            "--config",
-            "-c",
-            help="Processing configuration is specified in this YAML file.",
-        ),
-    ] = None,
+    out_file: _out_file_annotation = "slocum.l2.nc",
+    config_file: _config_annotation = None,
     output_extras: Annotated[
         bool,
         typer.Option(
@@ -84,18 +96,13 @@ def l2(
         ),
     ] = 5.0,
 ) -> None:
-    _log.debug("Flight file %s", flt_file)
-    _log.debug("Science file %s", sci_file)
-    _log.debug("Output file %s", out_file)
-    _log.debug("Config file %s", config_file)
-
     conf = config.load_config(config_file)
 
-    flt = level2.parse_l1(flt_file)
-    sci = level2.parse_l1(sci_file)
+    flt = process_l1.parse_l1(flt_file, conf)
+    sci = process_l1.parse_l1(sci_file, conf)
 
-    flt = level2.apply_qc(flt, conf)
-    sci = level2.apply_qc(sci, conf)
+    flt = process_l1.apply_qc(flt, conf)
+    sci = process_l1.apply_qc(sci, conf)
 
     if output_extras:
         out_dir = Path(out_file).parent
@@ -103,31 +110,31 @@ def l2(
         flt.to_netcdf(Path(out_dir, "flt.nc"))
         sci.to_netcdf(Path(out_dir, "sci.nc"))
 
-    merged = level2.merge(flt, sci, conf, "science")
+    merged = process_l1.merge(flt, sci, conf, "science")
 
-    merged = level2.calculate_thermodynamics(merged, conf)
+    merged = process_l1.calculate_thermodynamics(merged, conf)
 
     if output_extras:
         out_dir = Path(out_file).parent
         _log.debug("Saving merged output to %s", out_dir)
         merged.to_netcdf(Path(out_dir, "merged.nc"))
 
-    out = level2.get_profiles(merged, p_near_surface, dp_threshold)
+    out = process_l1.get_profiles(merged, p_near_surface, dp_threshold)
 
-    out = level2.enforce_types(out, conf)
+    out = process_l1.enforce_types(out, conf)
 
-    # Apply global netCDF attributes
     out.attrs = conf["globals"]["netcdf_attributes"]
+
+    out.encoding["unlimited_dims"] = {}
 
     out.to_netcdf(out_file)
 
 
 @app.command()
+@log_args
 def l3(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
-    out_file: Annotated[
-        str, typer.Option("--out", "-o", help="The output file.")
-    ] = "slocum.l3.nc",
+    out_file: _out_file_annotation = "slocum.l3.nc",
     bin_size: Annotated[
         float, typer.Option("--bin", "-b", help="Depth bin size in meters.")
     ] = 10.0,
@@ -135,42 +142,26 @@ def l3(
         str | None,
         typer.Option("--q-in", "-q", help="netCDF file(s) processed by q2netcdf."),
     ] = None,
-    config_file: Annotated[
-        str | None,
-        typer.Option(
-            "--config",
-            "-c",
-            help="Processing configuration is specified in this YAML file.",
-        ),
-    ] = None,
+    config_file: _config_annotation = None,
 ) -> None:
-    _log.debug("L2 file %s", l2_file)
-    _log.debug("Output file %s", out_file)
-    _log.debug("Bin size %s", bin_size)
-    _log.debug("q netcdf file %s", q_netcdf)
+    l2 = process_l2.parse_l2(l2_file)
 
-    l2 = level3.parse_l2(l2_file)
-
-    out = level3.bin_l2(l2, bin_size)
+    out = process_l2.bin_l2(l2, bin_size)
 
     if q_netcdf is not None:
         conf = config.load_config(config_file)
-        out = level3.bin_q(out, q_netcdf, bin_size, conf)
+        out = process_l2.bin_q(out, q_netcdf, bin_size, conf)
 
     out.to_netcdf(out_file)
 
 
 @app.command()
+@log_args
 def hot(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
-    out_file: Annotated[
-        str, typer.Option("--out", "-o", help="The output file.")
-    ] = "slocum.hotel.mat",
+    out_file: _out_file_annotation = "slocum.hotel.mat",
 ) -> None:
-    _log.debug("L2 file %s", l2_file)
-    _log.debug("Output file %s", out_file)
-
-    l2 = level3.parse_l2(l2_file)
+    l2 = process_l2.parse_l2(l2_file)
 
     hotel_struct = hotel.create_structure(l2)
 
@@ -178,16 +169,12 @@ def hot(
 
 
 @app.command()
+@log_args
 def gps(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
-    out_file: Annotated[
-        str, typer.Option("--out", "-o", help="The output file.")
-    ] = "slocum.gps.csv",
+    out_file: _out_file_annotation = "slocum.gps.csv",
 ) -> None:
-    _log.debug("L2 file %s", l2_file)
-    _log.debug("Output file %s", out_file)
-
-    l2 = level3.parse_l2(l2_file)
+    l2 = process_l2.parse_l2(l2_file)
 
     gps = hotel.extract_gps(l2)
 
