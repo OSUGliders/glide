@@ -350,8 +350,8 @@ z:
     long_name: Height
     standard_name: height
     units: m
-    valid_min: 0.0
-    valid_max: -2000.0
+    valid_min: -2000.0
+    valid_max: 0.0
     positive: "up"
     reference_datum: "sea-surface"
     instrument: "instrument_ctd"

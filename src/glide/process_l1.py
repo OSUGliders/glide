@@ -14,8 +14,10 @@ from . import qc
 
 _log = logging.getLogger(__name__)
 
+# Helper functions
 
-def load_l1_file(file: str | xr.Dataset) -> xr.Dataset:
+
+def _load_l1_file(file: str | xr.Dataset) -> xr.Dataset:
     if isinstance(file, str):
         _log.debug("Parsing L1 %s", file)
         try:
@@ -31,7 +33,7 @@ def load_l1_file(file: str | xr.Dataset) -> xr.Dataset:
     return ds
 
 
-def fix_time_varaiable_conflict(ds: xr.Dataset) -> xr.Dataset:
+def _fix_time_varaiable_conflict(ds: xr.Dataset) -> xr.Dataset:
     if "m_present_time" in ds.variables and "sci_m_present_time" in ds.variables:
         _log.debug(
             "Found conflicting time variables, dropping %s", "sci_m_present_time"
@@ -41,7 +43,7 @@ def fix_time_varaiable_conflict(ds: xr.Dataset) -> xr.Dataset:
         return ds
 
 
-def format_variables(
+def _format_variables(
     ds: xr.Dataset,
     config: dict,
 ) -> xr.Dataset:
@@ -57,13 +59,13 @@ def format_variables(
         specs = config["variables"][name]
 
         if "conversion" in specs:
-            _log.debug("Converting %s using %s", var, specs["conversion"])
+            _log.debug("Converting %s with %s", var, specs["conversion"])
             conversion_function = getattr(conv, specs["conversion"])
             ds[var] = (ds[var].dims, conversion_function(ds[var].values), ds[var].attrs)
 
         if "CF" in specs:
             _log.debug(
-                "Applying CF attributes to %s which has existing attributes %s",
+                "Applying CF attributes to %s with existing attributes %s",
                 var,
                 ds[var].attrs,
             )
@@ -80,14 +82,17 @@ def format_variables(
     return ds
 
 
+# Public API functions
+
+
 def parse_l1(file: str | xr.Dataset, config: dict) -> xr.Dataset:
     """Parses flight (sbd) or science (tbd) data processed by dbd2netcdf or dbd2csv."""
 
-    ds = load_l1_file(file)
+    ds = _load_l1_file(file)
 
-    ds = fix_time_varaiable_conflict(ds)
+    ds = _fix_time_varaiable_conflict(ds)
 
-    ds = format_variables(ds, config)
+    ds = _format_variables(ds, config)
 
     return ds
 
@@ -98,7 +103,7 @@ def apply_qc(
 ) -> xr.Dataset:
     """The standard suite of L2 QC."""
 
-    ds = qc.init_qc(ds, config)
+    ds = qc.init_qc(ds, config=config)
 
     ds = qc.apply_bounds(ds)
 
@@ -211,7 +216,7 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
 
     # Initialize quality control
     new_variables = ["salinity", "SA", "density", "rho0", "CT"]
-    ds = qc.init_qc(ds, config, new_variables, ds.conductivity_qc.values)
+    ds = qc.init_qc(ds, new_variables, ds.conductivity_qc.values, config)
     ds = qc.apply_bounds(ds, new_variables)
 
     z = gsw.z_from_p(ds.pressure, lat)
@@ -219,14 +224,14 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     ds["depth"] = (dims, -z.values, variable_specs["depth"]["CF"])
 
     new_variables = ["z", "depth"]
-    ds = qc.init_qc(ds, config, new_variables, ds.pressure_qc.values)
+    ds = qc.init_qc(ds, new_variables, ds.pressure_qc.values, config)
 
     N2, _ = gsw.Nsquared(ds.SA, ds.CT, ds.pressure, ds.lat)
     # Try interpolating N2 back onto positions of data.
     # This does have the effect of low-pass filtering.
     N2 = xr.DataArray(N2, {"time": conv.mid(ds.time)})
     ds["N2"] = (dims, N2.interp(time=ds.time).values, variable_specs["N2"]["CF"])
-    ds = qc.init_qc_variable(ds, "N2")
+    ds = qc.init_qc(ds, "N2")
 
     return ds
 
