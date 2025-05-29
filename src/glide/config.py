@@ -7,8 +7,6 @@ from yaml import safe_load_all
 
 _log = logging.getLogger(__name__)
 
-__all__ = ["load_config"]
-
 # Helper functions
 
 
