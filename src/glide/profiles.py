@@ -39,7 +39,7 @@ def contiguous_regions(condition: ArrayLike) -> NDArray:
     return idx
 
 
-def find_profiles_using_logic(
+def find_profiles(
     p: ArrayLike,
     p_near_surface: float = 1.0,
     dp_threshold: float = 5.0,

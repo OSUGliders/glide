@@ -15,12 +15,38 @@ from . import qc
 _log = logging.getLogger(__name__)
 
 
+def load_l1_file(file: str | xr.Dataset) -> xr.Dataset:
+    if isinstance(file, str):
+        _log.debug("Parsing L1 %s", file)
+        try:
+            ds = xr.open_dataset(file, decode_timedelta=True).drop_dims("j").load()
+            _log.debug("xarray.open_dataset opened %s", file)
+        except ValueError:
+            ds = pd.read_csv(file).to_xarray()
+            _log.debug("pandas.read_csv opened %s", file)
+    elif isinstance(file, xr.Dataset):  # Primarily for testing
+        ds = file
+    else:
+        raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
+    return ds
+
+
+def fix_time_varaiable_conflict(ds: xr.Dataset) -> xr.Dataset:
+    if "m_present_time" in ds.variables and "sci_m_present_time" in ds.variables:
+        _log.debug(
+            "Found conflicting time variables, dropping %s", "sci_m_present_time"
+        )
+        return ds.drop("sci_m_present_time")
+    else:
+        return ds
+
+
 def format_variables(
     ds: xr.Dataset,
     config: dict,
 ) -> xr.Dataset:
-    """Formats time series variables following the instructions in the variable specification file.
-    Drops variables that are not in the file."""
+    """Extracts only variables specified in the config. Applies metadata to variables.
+    Converts variable units."""
 
     _log.debug("Formatting variables")
     reduced_name_map = {
@@ -54,28 +80,14 @@ def format_variables(
     return ds
 
 
-def fix_time_varaiable_conflict(ds: xr.Dataset) -> xr.Dataset:
-    if "m_present_time" in ds.variables and "sci_m_present_time" in ds.variables:
-        return ds.drop("sci_m_present_time")
-    else:
-        return ds
-
-
-def parse_l1(file: str | xr.Dataset) -> xr.Dataset:
+def parse_l1(file: str | xr.Dataset, config: dict) -> xr.Dataset:
     """Parses flight (sbd) or science (tbd) data processed by dbd2netcdf or dbd2csv."""
 
-    if isinstance(file, str):
-        _log.debug("Parsing L1 %s", file)
-        try:
-            ds = xr.open_dataset(file, decode_timedelta=True).drop_dims("j").load()
-            _log.debug("xarray.open_dataset opened %s", file)
-        except ValueError:
-            ds = pd.read_csv(file).to_xarray()
-            _log.debug("pandas.read_csv opened %s", file)
-    elif isinstance(file, xr.Dataset):  # Primarily for testing
-        ds = file
-    else:
-        raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
+    ds = load_l1_file(file)
+
+    ds = fix_time_varaiable_conflict(ds)
+
+    ds = format_variables(ds, config)
 
     return ds
 
@@ -85,10 +97,6 @@ def apply_qc(
     config: dict,
 ) -> xr.Dataset:
     """The standard suite of L2 QC."""
-
-    ds = fix_time_varaiable_conflict(ds)
-
-    ds = format_variables(ds, config)
 
     ds = qc.init_qc(ds, config)
 
@@ -116,9 +124,6 @@ def apply_qc(
     _log.debug("Before dropna, %i points along dim %s", ds.sizes[dim], dim)
     ds = ds.dropna(dim, how="all")
     _log.debug("After dropna, %i points along dim %s", ds.sizes[dim], dim)
-
-    # Drop all unlimited dimensions that might be leftover from dbd2netcdf
-    ds.encoding["unlimited_dims"] = {}
 
     return ds
 
@@ -229,7 +234,7 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
 def get_profiles(
     ds: xr.Dataset, p_near_surface: float, dp_threshold: float
 ) -> xr.Dataset:
-    dive_id, climb_id, state = pfls.find_profiles_using_logic(
+    dive_id, climb_id, state = pfls.find_profiles(
         ds.pressure, p_near_surface, dp_threshold
     )
     ds["dive_id"] = ("time", dive_id, dict(_FillValue=-1))
@@ -249,6 +254,7 @@ def get_profiles(
 
 
 def enforce_types(ds: xr.Dataset, config: dict) -> xr.Dataset:
+    """Enforce data types on variables based on the configuration file."""
     variable_specs = {
         var: specs
         for var, specs in config["variables"].items()
