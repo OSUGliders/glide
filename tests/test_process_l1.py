@@ -17,10 +17,10 @@ def get_test_data(sn: str = "684", ftype: str = "sbd") -> xr.Dataset:
 
 def test_format_variables() -> None:
     config = load_config()
-    sbd = pl1.format_variables(get_test_data("684", "sbd"), config)
+    sbd = pl1._format_variables(get_test_data("684", "sbd"), config)
     assert hasattr(sbd, "time")
     assert hasattr(sbd.time, "units")
-    tbd = pl1.format_variables(get_test_data("684", "tbd"), config)
+    tbd = pl1._format_variables(get_test_data("684", "tbd"), config)
     assert hasattr(tbd, "time")
     assert hasattr(tbd.time, "units")
 

@@ -7,6 +7,15 @@ from yaml import safe_load_all
 
 _log = logging.getLogger(__name__)
 
+# Helper functions
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=timezone.utc)
+
+
+# Public functions
+
 
 def load_config(file: str | None = None) -> dict:
     """Extract variable specifications from a yaml file."""
@@ -37,7 +46,7 @@ def load_config(file: str | None = None) -> dict:
     # parse datetime in time valid_min and valid_max
     for v in ["valid_min", "valid_max"]:
         if v in variable_specs["time"]["CF"]:
-            variable_specs["time"]["CF"][v] = ensure_utc(
+            variable_specs["time"]["CF"][v] = _ensure_utc(
                 variable_specs["time"]["CF"][v]
             ).timestamp()
 
@@ -46,7 +55,3 @@ def load_config(file: str | None = None) -> dict:
     )
 
     return config
-
-
-def ensure_utc(dt: datetime) -> datetime:
-    return dt.replace(tzinfo=timezone.utc)

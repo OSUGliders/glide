@@ -160,13 +160,13 @@ def initialise_test_data() -> xr.Dataset:
 
 
 def test_fit_line() -> None:
-    assert np.isclose(qc.fit_line(0, 0, 1, 2), (2, 0)).all()
-    assert np.isclose(qc.fit_line(-2, 2, 2, -1), (-3 / 4, 2 - 3 / 2)).all()
+    assert np.isclose(qc._fit_line(0, 0, 1, 2), (2, 0)).all()
+    assert np.isclose(qc._fit_line(-2, 2, 2, -1), (-3 / 4, 2 - 3 / 2)).all()
 
 
 def test_nan_out_of_bounds() -> None:
     y = [0.0, 1.1, 2.0, 2.9, 4.0]
-    y_ = qc.nan_out_of_bounds(y, 1, 3)
+    y_ = qc._nan_out_of_bounds(y, 1, 3)
     assert np.isnan(y_[0])
     assert np.isnan(y_[-1])
     assert np.isfinite(y_[1:4]).all()
@@ -190,13 +190,13 @@ def test_time() -> None:
 def test_gps() -> None:
     ds = initialise_test_data()
 
-    m0, c0 = qc.fit_line(
+    m0, c0 = qc._fit_line(
         ds.time[3].values,
         ds.m_gps_lon[3].values,
         ds.time[9].values,
         ds.m_gps_lon[9].values,
     )
-    m, c = qc.fit_line(
+    m, c = qc._fit_line(
         ds.time[4].values, ds.lon[4].values, ds.time[8].values, ds.lon[8].values
     )
     dl = (m0 - m) * ds.time[4:9].values + (c0 - c)
@@ -210,7 +210,7 @@ def test_gps() -> None:
 def test_init_qc_variable() -> None:
     ds = initialise_test_data()
 
-    ds = qc.init_qc_variable(ds, "lon")
+    ds = qc._init_qc_variable(ds, "lon")
     assert "lon_qc" in ds.variables
     assert ds.lon_qc.attrs["standard_name"] == "longitude status_flag"
     assert ds.lon.attrs["ancillary_variables"] == "lon_qc"

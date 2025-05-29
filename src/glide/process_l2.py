@@ -12,18 +12,23 @@ from . import profiles as pfls
 
 _log = logging.getLogger(__name__)
 
-
-def parse_l2(l2_file: str) -> xr.Dataset:
-    """Parse the level 2 data."""
-    return xr.open_dataset(l2_file).load()
+# Helper functions
 
 
-def get_profile_indexes(ds: xr.Dataset) -> NDArray:
+def _get_profile_indexes(ds: xr.Dataset) -> NDArray:
     """Find the dive and climb indexes."""
     id = pfls.contiguous_regions(np.isfinite(ds.dive_id.values))
     ic = pfls.contiguous_regions(np.isfinite(ds.climb_id.values))
     idxs = np.vstack((ic, id))
     return idxs[np.argsort(idxs[:, 0]), :]
+
+
+# Public functions
+
+
+def parse_l2(l2_file: str) -> xr.Dataset:
+    """Parse the level 2 data."""
+    return xr.open_dataset(l2_file).load()
 
 
 def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
@@ -38,7 +43,7 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
         depth_bins[-1],
     )
 
-    idxs = get_profile_indexes(ds)
+    idxs = _get_profile_indexes(ds)
 
     # Drop some variables but same some attributes
     qc_variables = [v for v in ds.variables if "_qc" in str(v)]
