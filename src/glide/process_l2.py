@@ -1,4 +1,4 @@
-# Level 3 processing parsed the level 2 processed data
+# Level 3 processing of the level 2 processed data
 # Data are binned in depth
 
 import logging
@@ -17,9 +17,9 @@ _log = logging.getLogger(__name__)
 
 def _get_profile_indexes(ds: xr.Dataset) -> NDArray:
     """Find the dive and climb indexes."""
-    id = pfls.contiguous_regions(np.isfinite(ds.dive_id.values))
-    ic = pfls.contiguous_regions(np.isfinite(ds.climb_id.values))
-    idxs = np.vstack((ic, id))
+    dives = pfls.contiguous_regions(np.isfinite(ds.dive_id.values))
+    climbs = pfls.contiguous_regions(np.isfinite(ds.climb_id.values))
+    idxs = np.vstack((climbs, dives))
     return idxs[np.argsort(idxs[:, 0]), :]
 
 
@@ -27,14 +27,12 @@ def _get_profile_indexes(ds: xr.Dataset) -> NDArray:
 
 
 def parse_l2(l2_file: str) -> xr.Dataset:
-    """Parse the level 2 data."""
-    return xr.open_dataset(l2_file).load()
+    return xr.open_dataset(l2_file, decode_timedelta=True).load()
 
 
 def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
     """Depth bin size specified in meters."""
 
-    # Generate bins
     depth_max = ds.depth.max()
     depth_bins = np.arange(0, depth_max + bin_size, bin_size)
     _log.debug(
@@ -43,9 +41,10 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
         depth_bins[-1],
     )
 
-    idxs = _get_profile_indexes(ds)
+    profile_indexes = _get_profile_indexes(ds)
 
-    # Drop some variables but same some attributes
+    # Dropping QC variables for now because it isn't clear how we should
+    # treat them after binning. We may want to define new QC variables in the future.
     qc_variables = [v for v in ds.variables if "_qc" in str(v)]
     drop_variables = qc_variables + ["dive_id", "climb_id", "state", "z"]
     _log.warning("Binning QC flags is not supported, dropping %s", drop_variables)
@@ -62,35 +61,35 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
     ds = ds.drop_vars(drop_variables)
 
     binned_profiles = []
-    state = []  # Dive / climb state
+    state = []
     profile_lat = []
     profile_lon = []
     profile_time = []
     profile_time_start = []
     profile_time_end = []
 
-    ds["time"] = ds.time.astype("f8") / 1e9  # Convert to seconds posix
+    # To properly bin time we have to make sure it is a floating point variable.
+    # So we need to make a new placeholder coordinate
+    ds["time"] = (
+        ds.time.astype("f8") / 1e9
+    )  # Convert to seconds posix. 1e9 is needed otherwise we get nanoseconds.
     time_attrs["units"] = "seconds since 1970-01-01T00:00:00"
+    ds["time"].attrs = time_attrs
+    ds["i"] = ("time", np.arange(len(ds.time)))
+    ds = ds.swap_dims({"time": "i"}).reset_coords("time")
 
-    for row in idxs:
-        state.append(s.values[row[0]])
-        profile = ds.isel(time=slice(row[0], row[1]))
-
-        # Store profile timing and position
+    for row in profile_indexes:
+        profile = ds.isel(i=slice(row[0], row[1]))
         time = profile.time.values
+        idx_mid = np.searchsorted(time, 0.5 * (time[0] + time[-1]))
+
+        state.append(s.values[row[0]])
         profile_time_start.append(time[0])
         profile_time_end.append(time[-1])
-        idx_mid = np.searchsorted(time, 0.5 * (time[0] + time[-1]))
         profile_time.append(time[idx_mid])
         profile_lat.append(profile.lat.values[idx_mid])
         profile_lon.append(profile.lon.values[idx_mid])
 
-        # Some juggling is required to properly bin time
-        # Make a new variable i
-        profile["i"] = ("time", np.arange(len(profile.time)))
-        # Make i the coordinate and swap time to a variable
-        profile = profile.swap_dims({"time": "i"}).reset_coords("time")
-        profile["time"].attrs = time_attrs
         binned = profile.groupby_bins("depth", depth_bins).mean()
 
         binned["depth_bins"] = [db.mid for db in binned.depth_bins.values]
@@ -98,7 +97,7 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
 
     ds_binned = xr.concat(binned_profiles, dim="profile")
 
-    # Swap some things around so that the plots look nice.
+    # This rearrangement of depth and height makes xarray plots look better.
     depth_attrs = ds_binned.depth.attrs
     ds_binned = ds_binned.drop_vars("depth")
     ds_binned = ds_binned.rename({"depth_bins": "depth"})
@@ -123,46 +122,6 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
 
     ds_binned["profile_id"] = (("profile",), np.arange(1, len(ds_binned.profile) + 1))
     ds_binned = ds_binned.swap_dims({"profile": "profile_id"}).set_coords("profile_id")
-    # ds_binned = ds_binned.set_coords(["profile_time", "profile_lat", "profile_lon"])
+    ds_binned = ds_binned.set_coords(["profile_time", "profile_lat", "profile_lon"])
 
     return ds_binned.transpose()
-
-
-def bin_q(ds: xr.Dataset, q_netcdf: str, bin_size: float, config: dict) -> xr.Dataset:
-    _log.debug("Loading Q files")
-    # Extract a subset of just the dissipation values
-    qds = xr.open_mfdataset(q_netcdf, decode_timedelta=False)
-
-    eds = qds[["e_1", "e_2"]]
-    eds["depth"] = -gsw.z_from_p(qds.pressure, ds.profile_lat.mean().values)
-
-    depth_bins = np.arange(
-        -ds.z[0] - bin_size / 2, -ds.z[-1] + 1.5 * bin_size, bin_size
-    )
-    _log.debug("Epsilon depth bins %s", depth_bins)
-
-    # Initialize data arrays
-    dims = ds.conductivity.dims
-
-    dissipation_variables = ["e_1", "e_2"]
-    for v in dissipation_variables:
-        ds[v] = (
-            dims,
-            np.full_like(ds.conductivity.values, np.nan),
-            config["variables"][v]["CF"],
-        )
-        # Convert from log
-        eds[v] = (eds[v].dims, 10 ** eds[v].values)
-
-    for i in range(ds.profile_id.size):
-        ds_ = ds.isel(profile_id=i)
-        eds_ = eds.sel(time=slice(ds_.profile_time_start, ds_.profile_time_end))
-        if eds_.e_1.size < 1:
-            _log.debug("No epsilon data")
-            continue
-        binned = eds_.groupby_bins("depth", depth_bins).mean()
-
-        for v in dissipation_variables:
-            ds[v][:, i] = binned[v].values
-
-    return ds

@@ -8,7 +8,7 @@ from pathlib import Path
 import typer
 from typing_extensions import Annotated
 
-from . import config, hotel, process_l1, process_l2
+from . import config, hotel, process_l1, process_l2, process_l3
 
 _log = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ _out_file_annotation = Annotated[
 
 @app.callback()
 def main(log_level: str = "WARN"):
-    """Configure the logging level."""
+    """glide is a command line program for processing Slocum glider data."""
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format="%(asctime)s %(message)s",
@@ -62,6 +62,9 @@ def l1b(
     out_file: _out_file_annotation = "slocum.l1b.nc",
     config_file: _config_annotation = None,
 ) -> None:
+    """
+    Generate L1B data from L1 data.
+    """
     conf = config.load_config(config_file)
 
     ds = process_l1.parse_l1(file, conf)
@@ -96,6 +99,9 @@ def l2(
         ),
     ] = 5.0,
 ) -> None:
+    """
+    Generate L2 data from L1 data.
+    """
     conf = config.load_config(config_file)
 
     flt = process_l1.parse_l1(flt_file, conf)
@@ -144,13 +150,62 @@ def l3(
     ] = None,
     config_file: _config_annotation = None,
 ) -> None:
+    """
+    Generate L3 data from L2 data.
+    """
     l2 = process_l2.parse_l2(l2_file)
 
     out = process_l2.bin_l2(l2, bin_size)
 
     if q_netcdf is not None:
         conf = config.load_config(config_file)
-        out = process_l2.bin_q(out, q_netcdf, bin_size, conf)
+
+        q = process_l3.parse_q(q_netcdf)
+
+        out = process_l3.bin_q(out, q, bin_size, conf)
+
+    out.to_netcdf(out_file)
+
+
+@app.command()
+@log_args
+def ml3(
+    l3_file: Annotated[str, typer.Argument(help="The L3 dataset.")],
+    out_file: _out_file_annotation = "slocum.l3.nc",
+    q_netcdf: Annotated[
+        str | None,
+        typer.Option("--q-in", "-q", help="netCDF file(s) processed by q2netcdf."),
+    ] = None,
+    config_file: _config_annotation = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-w",
+            help="Overwrite the existing L3 dataset if it exists.",
+        ),
+    ] = False,
+) -> None:
+    """
+    Merge ancillary data into L3 data.
+    """
+    # I could remove the defaul argument to enforce this rule but I am anticipating that
+    # in the future we may want to merge other kinds of data into the L3 dataset.
+    if q_netcdf is None:
+        raise typer.BadParameter("The --q-in option is required for ml3 command.")
+
+    if not overwrite and Path(out_file).exists():
+        raise typer.BadParameter(
+            f"The output file {out_file} already exists. Use --overwrite to overwrite it."
+        )
+
+    l3, bin_size = process_l3.parse_l3(l3_file)
+
+    conf = config.load_config(config_file)
+
+    q = process_l3.parse_q(q_netcdf)
+
+    out = process_l3.bin_q(l3, q, bin_size, conf)
 
     out.to_netcdf(out_file)
 
@@ -161,6 +216,9 @@ def hot(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
     out_file: _out_file_annotation = "slocum.hotel.mat",
 ) -> None:
+    """
+    Generate hotel mat file from L2 data.
+    """
     l2 = process_l2.parse_l2(l2_file)
 
     hotel_struct = hotel.create_structure(l2)
@@ -174,8 +232,31 @@ def gps(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
     out_file: _out_file_annotation = "slocum.gps.csv",
 ) -> None:
+    """
+    Generate gps csv file from L2 data.
+    """
     l2 = process_l2.parse_l2(l2_file)
 
     gps = hotel.extract_gps(l2)
 
     gps.to_dataframe().to_csv(out_file)
+
+
+@app.command()
+@log_args
+def concat(
+    files: Annotated[
+        list[str], typer.Argument(help="The netcdf files to concatenate.")
+    ],
+    out_file: _out_file_annotation = "concat.nc",
+    concat_dim: Annotated[
+        str,
+        typer.Option("--concat-dim", "-d", help="The dimension to concatenate along."),
+    ] = "time",
+) -> None:
+    """
+    Concatenate multiple netCDF files along a specified dimension.
+    """
+    ds = process_l3.concat(files, concat_dim=concat_dim)
+
+    ds.to_netcdf(out_file)

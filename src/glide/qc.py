@@ -21,6 +21,14 @@ def _init_qc_variable(
 
     y = ds[variable]
 
+    if flag_values is None:
+        flag_values = np.zeros_like(y, dtype="b")
+        flag_values[~np.isfinite(y)] = 9
+    else:
+        flag_values = np.asarray(flag_values)
+
+    qc_variable = variable + "_qc"
+
     qc_attrs = {
         "flag_meanings": "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed not_used not_used interpolated_value missing_value",
         "flag_values": np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], dtype="b"),
@@ -30,22 +38,14 @@ def _init_qc_variable(
         "valid_min": np.int8(0),
     }
 
-    if flag_values is None:
-        flag_values = np.zeros_like(y, dtype="b")
-        flag_values[~np.isfinite(y)] = 9
-    else:
-        flag_values = np.asarray(flag_values)
-
-    qcv = variable + "_qc"
-
-    ds[qcv] = (y.dims, flag_values, qc_attrs)
-    ds[variable].attrs["ancillary_variables"] = qcv
+    ds[qc_variable] = (y.dims, flag_values, qc_attrs)
+    ds[variable].attrs["ancillary_variables"] = qc_variable
 
     return ds
 
 
 def _update_qc_flag(
-    ds: xr.Dataset, variable: str, flag_value: int, locs: ArrayLike
+    ds: xr.Dataset, variable: str, flag_value: int, flag_index: ArrayLike
 ) -> xr.Dataset:
     """
     flag_values
@@ -61,20 +61,17 @@ def _update_qc_flag(
     9: missing_value
     """
 
-    locs = np.asarray(locs)
+    flag_index = np.asarray(flag_index)
 
-    qcv = variable + "_qc"
+    qc_variable = variable + "_qc"
 
-    if qcv not in ds.variables:
+    if qc_variable not in ds.variables:
         return ds
 
-    if np.logical_not(locs).all():
-        return ds
+    flag = ds[qc_variable].values
+    flag[flag_index] = np.int8(flag_value)
 
-    flag = ds[qcv].values
-    flag[locs] = np.int8(flag_value)
-
-    ds[qcv] = (ds[qcv].dims, flag, ds[qcv].attrs)
+    ds[qc_variable] = (ds[qc_variable].dims, flag, ds[qc_variable].attrs)
 
     return ds
 
@@ -94,19 +91,19 @@ def _apply_bounds_variable(ds: xr.Dataset, variable: str) -> xr.Dataset:
         _log.debug("%s has no valid_min or valid_max attribute, skipping", variable)
         return ds
 
-    vmin = y.attrs["valid_min"]
-    vmax = y.attrs["valid_max"]
+    valid_min = y.attrs["valid_min"]
+    valid_max = y.attrs["valid_max"]
 
     _log.debug(
         "Removing %s outside %s to %s",
         variable,
-        vmin,
-        vmax,
+        valid_min,
+        valid_max,
     )
 
     y_original = y.values.copy()
 
-    ds[variable] = (y.dims, _nan_out_of_bounds(y, vmin, vmax), y.attrs)
+    ds[variable] = (y.dims, _nan_out_of_bounds(y, valid_min, valid_max), y.attrs)
 
     # Update QC
     changed, unchanged = _changed_elements(y_original, y)
@@ -118,7 +115,8 @@ def _apply_bounds_variable(ds: xr.Dataset, variable: str) -> xr.Dataset:
 
 
 def _fit_line(x0: float, y0: float, x1: float, y1: float) -> tuple[float, float]:
-    """Slope and intercept between two points (x0, y0) and (x1, y1)."""
+    """Slope, m, and intercept, c, between two points (x0, y0) and (x1, y1).
+    Using the line equation y = mx + c."""
     m = (y1 - y0) / (x1 - x0)
     c = y0 - m * x0
     return m, c
@@ -255,12 +253,12 @@ def apply_bounds(ds: xr.Dataset, variables: Iterable | str | None = None) -> xr.
     if type(variables) is str:
         return _apply_bounds_variable(ds, variables)
 
-    for v in variables:
-        v = str(v)
-        if "_qc" in v:
+    for variable in variables:
+        variable = str(variable)
+        if "_qc" in variable:
             continue
 
-        ds = _apply_bounds_variable(ds, v)
+        ds = _apply_bounds_variable(ds, variable)
     return ds
 
 
@@ -287,13 +285,14 @@ def time(ds: xr.Dataset, time_var: str = "time") -> xr.Dataset:
     )
     ds = ds.isel({dim: idx})
 
-    # This converts time from a posix timestamp to a string
+    # To save the data with the appropriate formatting layer,
+    # we need to store the time values as strings.
     fmt = "%Y-%m-%dT%H:%M:%S"
     for attr in ["valid_min", "valid_max"]:
         val = ds[time_var].attrs[attr]
         ds[time_var].attrs[attr] = pd.to_datetime(val, unit="s").strftime(fmt)
 
-    # After this we are pretty confident in the times
+    # After this we are quite confident in the times
     ds = _update_qc_flag(ds, time_var, 2, np.full(ds[time_var].shape, True))
 
     return ds

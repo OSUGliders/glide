@@ -25,13 +25,11 @@ def load_config(file: str | None = None) -> dict:
         file = str(resources.files("glide").joinpath("assets/config.yml"))
 
     with open(file) as f:
-        # Documents in yaml are defined by: ---
         docs = [doc for doc in safe_load_all(f)]
 
     global_config = docs[0]
     variable_specs = docs[1]
 
-    # Generate mapping from Slocum source name to dataset name
     slocum_name_map = {
         source: variable_name
         for variable_name, specs in variable_specs.items()
@@ -43,11 +41,12 @@ def load_config(file: str | None = None) -> dict:
 
     _log.debug("Slocum name mapping dict %s", slocum_name_map)
 
-    # parse datetime in time valid_min and valid_max
-    for v in ["valid_min", "valid_max"]:
-        if v in variable_specs["time"]["CF"]:
-            variable_specs["time"]["CF"][v] = _ensure_utc(
-                variable_specs["time"]["CF"][v]
+    # pyyaml loads datetime objects in local timezone as datetime.datetime objects.
+    # We need to ensure that all datetime objects are in UTC timestamps for processing to work.
+    for attr in ["valid_min", "valid_max"]:
+        if attr in variable_specs["time"]["CF"]:
+            variable_specs["time"]["CF"][attr] = _ensure_utc(
+                variable_specs["time"]["CF"][attr]
             ).timestamp()
 
     config = dict(
