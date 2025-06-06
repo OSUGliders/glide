@@ -47,7 +47,7 @@ _out_file_annotation = Annotated[
 
 @app.callback()
 def main(log_level: str = "WARN"):
-    """Configure the logging level."""
+    """glide is a command line utility for processing Slocum glider data."""
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format="%(asctime)s %(message)s",
@@ -62,6 +62,9 @@ def l1b(
     out_file: _out_file_annotation = "slocum.l1b.nc",
     config_file: _config_annotation = None,
 ) -> None:
+    """
+    Generate L1B data from L1 data.
+    """
     conf = config.load_config(config_file)
 
     ds = process_l1.parse_l1(file, conf)
@@ -96,6 +99,9 @@ def l2(
         ),
     ] = 5.0,
 ) -> None:
+    """
+    Generate L2 data from L1 data.
+    """
     conf = config.load_config(config_file)
 
     flt = process_l1.parse_l1(flt_file, conf)
@@ -144,6 +150,9 @@ def l3(
     ] = None,
     config_file: _config_annotation = None,
 ) -> None:
+    """
+    Generate L3 data from L2 data.
+    """
     l2 = process_l2.parse_l2(l2_file)
 
     out = process_l2.bin_l2(l2, bin_size)
@@ -177,6 +186,9 @@ def ml3(
         ),
     ] = False,
 ) -> None:
+    """
+    Merge ancillary data into L3 data.
+    """
     # I could remove the defaul argument to enforce this rule but I am anticipating that
     # in the future we may want to merge other kinds of data into the L3 dataset.
     if q_netcdf is None:
@@ -204,6 +216,9 @@ def hot(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
     out_file: _out_file_annotation = "slocum.hotel.mat",
 ) -> None:
+    """
+    Generate hotel mat file from L2 data.
+    """
     l2 = process_l2.parse_l2(l2_file)
 
     hotel_struct = hotel.create_structure(l2)
@@ -217,6 +232,9 @@ def gps(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
     out_file: _out_file_annotation = "slocum.gps.csv",
 ) -> None:
+    """
+    Generate gps csv file from L2 data.
+    """
     l2 = process_l2.parse_l2(l2_file)
 
     gps = hotel.extract_gps(l2)
@@ -236,6 +254,9 @@ def concat(
         typer.Option("--concat-dim", "-d", help="The dimension to concatenate along."),
     ] = "time",
 ) -> None:
+    """
+    Concatenate multiple netCDF files along a specified dimension.
+    """
     ds = process_l3.concat(files, concat_dim=concat_dim)
 
     ds.to_netcdf(out_file)
