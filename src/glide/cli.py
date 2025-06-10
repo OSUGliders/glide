@@ -46,12 +46,13 @@ _out_file_annotation = Annotated[
 
 
 @app.callback()
-def main(log_level: str = "WARN"):
+def main(log_level: str = "WARN", log_file: str | None = None) -> None:
     """glide is a command line program for processing Slocum glider data."""
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format="%(asctime)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
+        filename=log_file,
     )
 
 
