@@ -255,8 +255,23 @@ def concat(
     ] = "time",
 ) -> None:
     """
-    Concatenate multiple netCDF files along a specified dimension.
+    Concatenate multiple netCDF files along a dimension.
     """
     ds = process_l3.concat(files, concat_dim=concat_dim)
 
     ds.to_netcdf(out_file)
+
+
+@app.command()
+@log_args
+def cfg(
+    out_file: _out_file_annotation = "default.config.yaml",
+) -> None:
+    """
+    Output the default configuration file.
+    """
+    import shutil
+    from importlib import resources
+
+    config_file = str(resources.files("glide").joinpath("assets/config.yml"))
+    shutil.copy(config_file, out_file)
