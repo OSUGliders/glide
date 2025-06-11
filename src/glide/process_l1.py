@@ -34,6 +34,8 @@ def _load_l1_file(file: str | xr.Dataset) -> xr.Dataset:
 
 
 def _fix_time_varaiable_conflict(ds: xr.Dataset) -> xr.Dataset:
+    """This fixes conflicting time variable names when parsing a combined flight/science data.
+    Generally, they should be parsed separately."""
     if "m_present_time" in ds.variables and "sci_m_present_time" in ds.variables:
         _log.debug(
             "Found conflicting time variables, dropping %s", "sci_m_present_time"
@@ -109,22 +111,23 @@ def apply_qc(
 
     ds = qc.time(ds)
 
-    # Make time the coordinate.
-    dim = list(ds.sizes.keys())[0]  # Assume 1D dataset
+    # Prior to this point time is a variable and the dimeension is usually `i`. 
+    dim = list(ds.sizes.keys())[0] 
     _log.debug("Swapping dimension %s for time", dim)
     ds = ds.swap_dims({dim: "time"})
 
-    # Apply gps QC, will only work on flight data
+    # Applying gps QC will only work on flight data
+    # so we need this to catch parsing of science data.
     try:
         ds = qc.gps(ds)
     except AttributeError:
         _log.debug("Failed to apply gps QC.")
 
-    # Interpolate missing data
     ds = qc.interpolate_missing(ds, config)
 
-    # Drop data that are all nan.
-    # Must come after promote_time because we want it to ignore the time coordinate.
+    # Drop data that are all nan must come after time is promoted to a coords 
+    # because we want it to ignore the time coordinate. The time qc dealt with
+    # NaNs in the time values. 
     dim = list(ds.sizes.keys())[0]
     _log.debug("Before dropna, %i points along dim %s", ds.sizes[dim], dim)
     ds = ds.dropna(dim, how="all")
@@ -195,6 +198,7 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
 
     variable_specs = config["variables"]
 
+    # These variables derive their initial qc from the conductivity_qc.
     salinity = gsw.SP_from_C(
         conv.spm_to_mspcm(ds.conductivity), ds.temperature, ds.pressure
     )
@@ -214,11 +218,12 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     CT = gsw.CT_from_t(ds.SA, ds.temperature, ds.pressure)
     ds["CT"] = (dims, CT.values, variable_specs["CT"]["CF"])
 
-    # Initialize quality control
     new_variables = ["salinity", "SA", "density", "rho0", "CT"]
     ds = qc.init_qc(ds, new_variables, ds.conductivity_qc.values, config)
     ds = qc.apply_bounds(ds, new_variables)
 
+    # These variables derive their initial qc from the pressure_qc so have to be
+    # treated separately.
     z = gsw.z_from_p(ds.pressure, lat)
     ds["z"] = (dims, z.values, variable_specs["z"]["CF"])
     ds["depth"] = (dims, -z.values, variable_specs["depth"]["CF"])
@@ -227,8 +232,10 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     ds = qc.init_qc(ds, new_variables, ds.pressure_qc.values, config)
 
     N2, _ = gsw.Nsquared(ds.SA, ds.CT, ds.pressure, ds.lat)
-    # Try interpolating N2 back onto positions of data.
-    # This does have the effect of low-pass filtering.
+
+    # N2 is calculated at the mid-point pressures. Here we try interpolating 
+    # N2 back onto positions of data. This does have the effect of low-pass filtering slightly,
+    # which may not be a bad thing because N2 is often noisy.
     N2 = xr.DataArray(N2, {"time": conv.mid(ds.time)})
     ds["N2"] = (dims, N2.interp(time=ds.time).values, variable_specs["N2"]["CF"])
     ds = qc.init_qc(ds, "N2")
@@ -242,8 +249,8 @@ def get_profiles(
     dive_id, climb_id, state = pfls.find_profiles(
         ds.pressure, p_near_surface, dp_threshold
     )
-    ds["dive_id"] = ("time", dive_id, dict(_FillValue=-1))
-    ds["climb_id"] = ("time", climb_id, dict(_FillValue=-1))
+    ds["dive_id"] = ("time", dive_id.astype('i4'), dict(_FillValue=np.int16(-1)))
+    ds["climb_id"] = ("time", climb_id.astype('i4'), dict(_FillValue=np.int16(-1)))
     ds["state"] = (
         "time",
         state.astype("b"),

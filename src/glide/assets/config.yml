@@ -52,7 +52,7 @@ time: # This is the name the we want
     valid_min: 2000-01-01T00:00:00  # pyyaml automatically converts timestamps to datetime.datetime objects
     valid_max: 2040-01-01T00:00:00
 
-# FLIGHT VARIABLES
+# FLIGHT COMPUTER VARIABLES
 
 lat: # This is the name that we want
   source: m_lat  # This is the name that Slocum gliders use
@@ -180,8 +180,25 @@ m_depth:
     reference_datum: "sea-surface"
     instrument: "instrument_ctd"
     observation_type: "measured"
+
+# m_fin: 
+#   source: m_fin
+#   conversion: rad_to_deg
+#   interpolate_missing: True
+#   dtype: f4
+#   CF:
+#     long_name: Fin angle
+#     units: degrees
+
+# m_battpos:
+#   source: m_battpos
+#   interpolate_missing: True
+#   dtype: f4
+#   CF:
+#     long_name: Battery position
+#     units: inches
     
-# SCIENCE VARIABLES
+# SCIENCE COMPUTER VARIABLES
 
 pressure: 
   source: sci_water_pressure
