@@ -111,8 +111,8 @@ def apply_qc(
 
     ds = qc.time(ds)
 
-    # Prior to this point time is a variable and the dimeension is usually `i`. 
-    dim = list(ds.sizes.keys())[0] 
+    # Prior to this point time is a variable and the dimeension is usually `i`.
+    dim = list(ds.sizes.keys())[0]
     _log.debug("Swapping dimension %s for time", dim)
     ds = ds.swap_dims({dim: "time"})
 
@@ -125,9 +125,9 @@ def apply_qc(
 
     ds = qc.interpolate_missing(ds, config)
 
-    # Drop data that are all nan must come after time is promoted to a coords 
+    # Drop data that are all nan must come after time is promoted to a coords
     # because we want it to ignore the time coordinate. The time qc dealt with
-    # NaNs in the time values. 
+    # NaNs in the time values.
     dim = list(ds.sizes.keys())[0]
     _log.debug("Before dropna, %i points along dim %s", ds.sizes[dim], dim)
     ds = ds.dropna(dim, how="all")
@@ -233,7 +233,7 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
 
     N2, _ = gsw.Nsquared(ds.SA, ds.CT, ds.pressure, ds.lat)
 
-    # N2 is calculated at the mid-point pressures. Here we try interpolating 
+    # N2 is calculated at the mid-point pressures. Here we try interpolating
     # N2 back onto positions of data. This does have the effect of low-pass filtering slightly,
     # which may not be a bad thing because N2 is often noisy.
     N2 = xr.DataArray(N2, {"time": conv.mid(ds.time)})
@@ -249,8 +249,8 @@ def get_profiles(
     dive_id, climb_id, state = pfls.find_profiles(
         ds.pressure, p_near_surface, dp_threshold
     )
-    ds["dive_id"] = ("time", dive_id.astype('i4'), dict(_FillValue=np.int16(-1)))
-    ds["climb_id"] = ("time", climb_id.astype('i4'), dict(_FillValue=np.int16(-1)))
+    ds["dive_id"] = ("time", dive_id.astype("i4"), dict(_FillValue=np.int16(-1)))
+    ds["climb_id"] = ("time", climb_id.astype("i4"), dict(_FillValue=np.int16(-1)))
     ds["state"] = (
         "time",
         state.astype("b"),

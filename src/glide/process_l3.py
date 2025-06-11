@@ -71,11 +71,11 @@ def bin_q(
     for i in range(ds.profile_id.size):
         ds_ = ds.isel(profile_id=i)
         eds_ = ds_q.sel(
-            # The type changing here is needed when the L2 data is binned just prior to 
+            # The type changing here is needed when the L2 data is binned just prior to
             # binning the q file data, because the binning operation stores
             # the start and end times as seconds since 1970-01-01T00:00:00. When merging q
             # data into L3 file directly the start and end times should already be datetimes
-            # because xarray parses the epoch upon loading. 
+            # because xarray parses the epoch upon loading.
             time=slice(
                 ds_.profile_time_start.astype("M8[s]"),
                 ds_.profile_time_end.astype("M8[s]"),
