@@ -247,11 +247,15 @@ def get_profiles(ds: xr.Dataset) -> xr.Dataset:
     # TODO: pass as arguments
     peaks_kwargs = {"height": 10, "distance": 10, "width": 10, "prominence": 10}
 
+    _log.debug("Finding profiles with peaks_kwargs %s", peaks_kwargs)
+
     profiles = find_profiles(
         ds.pressure.values,
         peaks_kwargs=peaks_kwargs,
         missing="drop",
     )
+
+    _log.debug("Found %i profiles", len(profiles))
 
     n = ds.time.size
     dive_id = np.full(n, -1, dtype="i4")
