@@ -7,9 +7,9 @@ import gsw
 import numpy as np
 import pandas as pd
 import xarray as xr
+from profinder import find_profiles
 
 from . import convert as conv
-from . import profiles as pfls
 from . import qc
 
 _log = logging.getLogger(__name__)
@@ -243,25 +243,53 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     return ds
 
 
-def get_profiles(
-    ds: xr.Dataset, p_near_surface: float, dp_threshold: float
-) -> xr.Dataset:
-    dive_id, climb_id, state = pfls.find_profiles(
-        ds.pressure, p_near_surface, dp_threshold
+def get_profiles(ds: xr.Dataset) -> xr.Dataset:
+    # TODO: pass as arguments
+    peaks_kwargs = {"height": 10, "distance": 10, "width": 10, "prominence": 10}
+
+    _log.debug("Finding profiles with peaks_kwargs %s", peaks_kwargs)
+
+    profiles = find_profiles(
+        ds.pressure.values,
+        peaks_kwargs=peaks_kwargs,
+        missing="drop",
     )
-    ds["dive_id"] = ("time", dive_id.astype("i4"), dict(_FillValue=np.int16(-1)))
-    ds["climb_id"] = ("time", climb_id.astype("i4"), dict(_FillValue=np.int16(-1)))
+
+    _log.debug("Found %i profiles", len(profiles))
+
+    n = ds.time.size
+    dive_id = np.full(n, -1, dtype="i4")
+    climb_id = np.full(n, -1, dtype="i4")
+    state = np.full(n, -1, dtype="b")
+
+    dive_counter = 1
+    climb_counter = 1
+
+    for prof in profiles:
+        dive_start, dive_end, climb_start, climb_end = prof
+
+        dive_id[dive_start:dive_end] = dive_counter
+        state[dive_start:dive_end] = 1
+        dive_counter += 1
+
+        climb_id[climb_start:climb_end] = climb_counter
+        state[climb_start:climb_end] = 2
+        climb_counter += 1
+
+    ds["dive_id"] = ("time", dive_id, dict(_FillValue=np.int16(-1)))
+    ds["climb_id"] = ("time", climb_id, dict(_FillValue=np.int16(-1)))
     ds["state"] = (
         "time",
-        state.astype("b"),
+        state,
         dict(
             long_name="Glider state",
             flag_values=np.array([-1, 0, 1, 2], "b"),
-            flag_meanings="state_unknown surfaced diving climbing",
-            valid_max=np.int8(3),
+            flag_meanings="unknown surface dive climb",
+            valid_max=np.int8(2),
             valid_min=np.int8(-1),
         ),
     )
+
     return ds
 
 
