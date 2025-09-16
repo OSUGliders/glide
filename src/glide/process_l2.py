@@ -7,17 +7,45 @@ import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
-from . import profiles as pfls
-
 _log = logging.getLogger(__name__)
 
 # Helper functions
 
+def _contiguous_regions(condition: NDArray) -> NDArray:
+    """Finds the indices of contiguous True regions in a boolean array.
+
+    Parameters
+    ----------
+    condition : array_like
+            Array of boolean values.
+
+    Returns
+    -------
+    idx : ndarray
+            Array of indices demarking the start and end of contiguous True regions in condition.
+            Shape is (N, 2) where N is the number of regions.
+
+    """
+
+    condition = np.asarray(condition)
+    d = np.diff(condition)
+    (idx,) = d.nonzero()
+    idx += 1
+
+    if condition[0]:
+        idx = np.r_[0, idx]
+
+    if condition[-1]:
+        idx = np.r_[idx, condition.size]
+
+    idx.shape = (-1, 2)
+    return idx
+
 
 def _get_profile_indexes(ds: xr.Dataset) -> NDArray:
     """Find the dive and climb indexes."""
-    dives = pfls.contiguous_regions(np.isfinite(ds.dive_id.values))
-    climbs = pfls.contiguous_regions(np.isfinite(ds.climb_id.values))
+    dives = _contiguous_regions(np.isfinite(ds.dive_id.values))
+    climbs = _contiguous_regions(np.isfinite(ds.climb_id.values))
     idxs = np.vstack((climbs, dives))
     return idxs[np.argsort(idxs[:, 0]), :]
 

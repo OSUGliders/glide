@@ -90,15 +90,6 @@ def l2(
             help="Choose whether to output L1B files (flt/sci/merged).",
         ),
     ] = False,
-    p_near_surface: Annotated[
-        float, typer.Option(help="Near surface pressure used for detemining profiles.")
-    ] = 1.0,
-    dp_threshold: Annotated[
-        float,
-        typer.Option(
-            help="Factor applied to determine surfaces when encountering missing data."
-        ),
-    ] = 5.0,
 ) -> None:
     """
     Generate L2 data from L1 data.
@@ -126,7 +117,7 @@ def l2(
         _log.debug("Saving merged output to %s", out_dir)
         merged.to_netcdf(Path(out_dir, "merged.nc"))
 
-    out = process_l1.get_profiles(merged, p_near_surface, dp_threshold)
+    out = process_l1.get_profiles(merged)
 
     out = process_l1.enforce_types(out, conf)
 
