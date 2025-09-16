@@ -11,6 +11,7 @@ _log = logging.getLogger(__name__)
 
 # Helper functions
 
+
 def _contiguous_regions(condition: NDArray) -> NDArray:
     """Finds the indices of contiguous True regions in a boolean array.
 

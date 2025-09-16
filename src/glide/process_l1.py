@@ -244,12 +244,11 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
 
 
 def get_profiles(ds: xr.Dataset) -> xr.Dataset:
-    
     # TODO: pass as arguments
     peaks_kwargs = {"height": 10, "distance": 10, "width": 10, "prominence": 10}
 
     profiles = find_profiles(
-        ds.pressure.values, 
+        ds.pressure.values,
         peaks_kwargs=peaks_kwargs,
         missing="drop",
     )
@@ -266,11 +265,11 @@ def get_profiles(ds: xr.Dataset) -> xr.Dataset:
         dive_start, dive_end, climb_start, climb_end = prof
 
         dive_id[dive_start:dive_end] = dive_counter
-        state[dive_start:dive_end] = 1 
+        state[dive_start:dive_end] = 1
         dive_counter += 1
 
         climb_id[climb_start:climb_end] = climb_counter
-        state[climb_start:climb_end] = 2 
+        state[climb_start:climb_end] = 2
         climb_counter += 1
 
     ds["dive_id"] = ("time", dive_id, dict(_FillValue=np.int16(-1)))
@@ -284,7 +283,7 @@ def get_profiles(ds: xr.Dataset) -> xr.Dataset:
             flag_meanings="unknown surface dive climb",
             valid_max=np.int8(2),
             valid_min=np.int8(-1),
-        )
+        ),
     )
 
     return ds

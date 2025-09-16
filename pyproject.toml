@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Jesse Cusack", email = "jesse.cusack@oregonstate.edu" }
 ]
-requires-python = ">3.11"
+requires-python = ">=3.11"
 dependencies = [
     "bottleneck>=1.4.2",
     "dask>=2025.2.0",
