@@ -27,7 +27,9 @@ def test_l2() -> None:
 def test_l3() -> None:
     l2_file = str(resources.files("tests").joinpath("data/slocum.l2.nc"))
     out_file = str(resources.files("tests").joinpath("data/slocum.l3.nc"))
-    result = runner.invoke(app, ["l3", l2_file, "-o", out_file])
+    result = runner.invoke(
+        app, ["l3", l2_file, "-o", out_file, "-b", "10", "-d", "750"]
+    )
 
     assert result.exit_code == 0
 
