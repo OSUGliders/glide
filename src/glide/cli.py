@@ -12,6 +12,8 @@ from . import config, hotel, process_l1, process_l2, process_l3
 
 _log = logging.getLogger(__name__)
 
+logging.getLogger("flox").setLevel(logging.WARNING)
+
 app = typer.Typer()
 
 
@@ -136,6 +138,9 @@ def l3(
     bin_size: Annotated[
         float, typer.Option("--bin", "-b", help="Depth bin size in meters.")
     ] = 10.0,
+    depth: Annotated[
+        float | None, typer.Option("--depth", "-d", help="Max depth for binning.")
+    ] = None,
     q_netcdf: Annotated[
         str | None,
         typer.Option("--q-in", "-q", help="netCDF file(s) processed by q2netcdf."),
@@ -147,7 +152,7 @@ def l3(
     """
     l2 = process_l2.parse_l2(l2_file)
 
-    out = process_l2.bin_l2(l2, bin_size)
+    out = process_l2.bin_l2(l2, bin_size, depth)
 
     if q_netcdf is not None:
         conf = config.load_config(config_file)

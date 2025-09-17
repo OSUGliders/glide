@@ -58,11 +58,16 @@ def parse_l2(l2_file: str) -> xr.Dataset:
     return xr.open_dataset(l2_file, decode_timedelta=True).load()
 
 
-def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
+def bin_l2(
+    ds: xr.Dataset, bin_size: float = 10.0, depth: float | None = None
+) -> xr.Dataset:
     """Depth bin size specified in meters."""
 
-    depth_max = ds.depth.max()
-    depth_bins = np.arange(0, depth_max + bin_size, bin_size)
+    if depth is None:
+        depth = ds.depth.max()
+        _log.debug("Inferring max depth from data %.1f", depth)
+
+    depth_bins = np.arange(0, depth + bin_size, bin_size)
     _log.debug(
         "First left bin edge %.1f, last right bin edge %.1f",
         depth_bins[0],
@@ -123,6 +128,7 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
         binned["depth_bins"] = [db.mid for db in binned.depth_bins.values]
         binned_profiles.append(binned)
 
+    _log.debug("Concatenating %i binned profiles", len(binned_profiles))
     ds_binned = xr.concat(binned_profiles, dim="profile")
 
     # This rearrangement of depth and height makes xarray plots look better.
@@ -139,7 +145,7 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
         dict(
             long_name="Glider state",
             flag_values=np.array([1, 2]).astype("i1"),
-            flag_meanings="diving climbing",
+            flag_meanings="dive climb",
         ),
     )
     ds_binned["profile_time"] = (("profile",), profile_time, time_attrs)
