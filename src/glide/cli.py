@@ -12,12 +12,13 @@ from . import config, hotel, process_l1, process_l2, process_l3
 
 _log = logging.getLogger(__name__)
 
+logging.getLogger("flox").setLevel(logging.WARNING)
+
 app = typer.Typer()
 
 
 def log_args(func):
     """Decorator to log all argument names and values to a function using the logging module."""
-
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         sig = inspect.signature(func)

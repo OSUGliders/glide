@@ -139,7 +139,7 @@ def bin_l2(ds: xr.Dataset, bin_size: float = 10.0) -> xr.Dataset:
         dict(
             long_name="Glider state",
             flag_values=np.array([1, 2]).astype("i1"),
-            flag_meanings="diving climbing",
+            flag_meanings="dive climb",
         ),
     )
     ds_binned["profile_time"] = (("profile",), profile_time, time_attrs)
