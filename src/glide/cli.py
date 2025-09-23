@@ -84,14 +84,6 @@ def l2(
     sci_file: Annotated[str, typer.Argument(help="The science (ebd/tbd) data file.")],
     out_file: _out_file_annotation = "slocum.l2.nc",
     config_file: _config_annotation = None,
-    output_extras: Annotated[
-        bool,
-        typer.Option(
-            "--extras",
-            "-e",
-            help="Choose whether to output L1B files (flt/sci/merged).",
-        ),
-    ] = False,
     shallowest_profile: Annotated[
         float, typer.Option("-s", help="Shallowest allowed profile in dbar.")
     ] = 5.0,
@@ -113,20 +105,9 @@ def l2(
     flt = process_l1.apply_qc(flt, conf)
     sci = process_l1.apply_qc(sci, conf)
 
-    if output_extras:
-        out_dir = Path(out_file).parent
-        _log.debug("Saving parsed flight and science output to %s", out_dir)
-        flt.to_netcdf(Path(out_dir, "flt.nc"))
-        sci.to_netcdf(Path(out_dir, "sci.nc"))
-
     merged = process_l1.merge(flt, sci, conf, "science")
 
     merged = process_l1.calculate_thermodynamics(merged, conf)
-
-    if output_extras:
-        out_dir = Path(out_file).parent
-        _log.debug("Saving merged output to %s", out_dir)
-        merged.to_netcdf(Path(out_dir, "merged.nc"))
 
     out = process_l1.get_profiles(merged, shallowest_profile, profile_distance)
 
