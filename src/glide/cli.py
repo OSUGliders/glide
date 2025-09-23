@@ -92,6 +92,15 @@ def l2(
             help="Choose whether to output L1B files (flt/sci/merged).",
         ),
     ] = False,
+    shallowest_profile: Annotated[
+        float, typer.Option("-s", help="Shallowest allowed profile in dbar.")
+    ] = 5.0,
+    profile_distance: Annotated[
+        int,
+        typer.Option(
+            "-d", help="Minimum distance between profiles in number of data points."
+        ),
+    ] = 20,
 ) -> None:
     """
     Generate L2 data from L1 data.
@@ -119,7 +128,7 @@ def l2(
         _log.debug("Saving merged output to %s", out_dir)
         merged.to_netcdf(Path(out_dir, "merged.nc"))
 
-    out = process_l1.get_profiles(merged)
+    out = process_l1.get_profiles(merged, shallowest_profile, profile_distance)
 
     out = process_l1.enforce_types(out, conf)
 
