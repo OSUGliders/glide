@@ -243,9 +243,15 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     return ds
 
 
-def get_profiles(ds: xr.Dataset) -> xr.Dataset:
-    # TODO: pass as arguments
-    peaks_kwargs = {"height": 10, "distance": 10, "width": 10, "prominence": 10}
+def get_profiles(
+    ds: xr.Dataset, shallowest_profile: float, profile_distance: int
+) -> xr.Dataset:
+    peaks_kwargs = {
+        "height": shallowest_profile,
+        "distance": profile_distance,
+        "width": profile_distance,
+        "prominence": shallowest_profile,
+    }
 
     _log.debug("Finding profiles with peaks_kwargs %s", peaks_kwargs)
 
