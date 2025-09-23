@@ -96,7 +96,10 @@ def l2(
         float, typer.Option("-s", help="Shallowest allowed profile in dbar.")
     ] = 5.0,
     profile_distance: Annotated[
-        int, typer.Option("-d", help="Minimum distance between profiles in number of data points.")
+        int,
+        typer.Option(
+            "-d", help="Minimum distance between profiles in number of data points."
+        ),
     ] = 20,
 ) -> None:
     """
