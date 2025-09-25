@@ -397,7 +397,7 @@ requires-dist = [
     { name = "netcdf4", specifier = ">=1.7.2" },
     { name = "numpy", specifier = ">=2.2.2" },
     { name = "pandas", specifier = ">=2.2.3" },
-    { name = "profinder", specifier = "==0.2.1" },
+    { name = "profinder", specifier = "==0.2.2" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "scipy", specifier = ">=1.15.1" },
     { name = "typer-slim", specifier = ">=0.15.2" },
@@ -441,7 +441,7 @@ name = "importlib-metadata"
 version = "8.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp" },
+    { name = "zipp", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/33/08/c1395a292bb23fd03bdf572a1357c5a733d3eecbab877641ceacab23db6e/importlib_metadata-8.6.1.tar.gz", hash = "sha256:310b41d755445d74569f993ccfc22838295d9fe005425094fad953d7f15c8580", size = 55767, upload-time = "2025-01-20T22:21:30.429Z" }
 wheels = [
@@ -1010,15 +1010,15 @@ wheels = [
 
 [[package]]
 name = "profinder"
-version = "0.2.1"
+version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/55/78/1ee04689409d35afcbe792045ae519b31a0607201ae33b8569819e9b7b4e/profinder-0.2.1.tar.gz", hash = "sha256:9e459401e82f2641fd3b54b53fc0d16084e5206a04c3769406677ba486d9b365", size = 651605, upload-time = "2025-09-16T20:55:46.726Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/67/e3/59d181721d6e8073189caba3ab46bc17c5bb2f130aa349c33ca52eb103d6/profinder-0.2.2.tar.gz", hash = "sha256:9a9a5e99205dbcadf7033a769478627110659ac8409ac928598c753768af888b", size = 652035, upload-time = "2025-09-25T04:13:21.921Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7b/f3/370b18a019b536b990753891cce24dac1efb85ce8bb740ce123824279519/profinder-0.2.1-py3-none-any.whl", hash = "sha256:577747e404de7e27a346bd3c67d9c71c81c46ed24ab4b3d7fd2d7529dfdc119a", size = 19432, upload-time = "2025-09-16T20:55:45.653Z" },
+    { url = "https://files.pythonhosted.org/packages/57/2e/b592779bbcc4e2c5db3c1872b97167c7419c4140dc4d1e3e7a8d54622b8b/profinder-0.2.2-py3-none-any.whl", hash = "sha256:c832c79df9d71e761291d36312a98d0bffbd7e0585da749af296a6d7c5a3fa74", size = 19525, upload-time = "2025-09-25T04:13:20.326Z" },
 ]
 
 [[package]]
