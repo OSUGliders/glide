@@ -3,6 +3,7 @@
 import functools
 import inspect
 import logging
+from importlib.metadata import version
 from pathlib import Path
 
 import typer
@@ -15,6 +16,12 @@ _log = logging.getLogger(__name__)
 logging.getLogger("flox").setLevel(logging.WARNING)
 
 app = typer.Typer()
+
+
+def version_callback(value: bool):
+    if value:
+        typer.echo(f"glide version {version('glide')}")
+        raise typer.Exit()
 
 
 def log_args(func):
@@ -48,7 +55,16 @@ _out_file_annotation = Annotated[
 
 
 @app.callback()
-def main(log_level: str = "WARN", log_file: str | None = None) -> None:
+def main(
+    log_level: str = "WARN",
+    log_file: str | None = None,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version", "-v", callback=version_callback, help="Show version and exit."
+        ),
+    ] = False,
+) -> None:
     """glide is a command line program for processing Slocum glider data."""
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
