@@ -17,10 +17,10 @@ Additionally, we provide the following intermediate processing outputs that may 
 
 ## Installation
 
-Use pip:
+Use pipx:
 
 ```bash
-pip install git+https://github.com/OSUGliders/glide
+pipx install git+https://github.com/OSUGliders/glide
 ```
 
 ## Usage
@@ -59,7 +59,7 @@ To extract the valid or interpolated location data into a CSV file
 glide gps glidername.l2.nc -o glidername.gps.csv
 ```
 
-## Quality controls
+## Quality control
 
 We currently apply the following QC during L1 -> L2 processing:
 
@@ -101,3 +101,11 @@ uv run glide --log-level=debug l2 tests/data/osu684.sbd.csv tests/data/osu684.tb
 ```
 
 By default this will produce a file `slocum.l2.nc`. 
+
+## Contributing
+
+Thank you for your interest in contributing to this project. Collaboration is highly encouraged, and contributions from the community are always welcome. To ensure a productive and respectful development process, please follow these guidelines.
+
+Before submitting any code, please open an issue to describe the problem you're addressing or the feature you'd like to implement. This allows for discussion around the proposed changes, helps align efforts, and ensures that contributions are in line with the project's goals. When creating an issue, be as detailed as possible. Include relevant context, your motivation, and any initial ideas you may have.
+
+Once an issue has been discussed and agreed upon, feel free to fork the repository and begin working on a solution in a separate branch. When you're ready, submit a pull request that references the related issue and clearly outlines the changes you've made. Try to keep your pull requests focused and limited to a single concern to make the review process smoother. Please ensure your code follows the existing style and structure of the project. If you're unsure about conventions or need guidance, don't hesitate to ask. Contributions should be well-tested.
