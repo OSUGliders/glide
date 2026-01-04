@@ -1,4 +1,4 @@
-# Additional processing of the l3 data, including the assimiation
+# Additional processing of the l3 data, including the assimilation
 # of other variables such as epsilon.
 import logging
 
@@ -18,31 +18,11 @@ def _infer_bin_size(ds: xr.Dataset) -> float:
 # Public functions
 
 
-def concat(file_list: list[str], concat_dim: str = "time") -> xr.Dataset:
-    _log.debug("Loading files")
-    return xr.open_mfdataset(
-        file_list,
-        concat_dim=concat_dim,
-        combine="nested",
-        compat="override",
-        coords="minimal",
-        decode_timedelta=False,
-        data_vars="minimal",
-    ).load()
-
-
-def parse_l3(l3_file: str) -> tuple[xr.Dataset, float]:
-    ds = xr.open_dataset(l3_file, decode_timedelta=True).load()
+def parse_l3(file: str) -> tuple[xr.Dataset, float]:
+    ds = xr.open_dataset(file, decode_timedelta=True).load()
     bin_size = _infer_bin_size(ds)
     ds.close()  # Will enable overwrite of existing l3 file.
     return ds, bin_size
-
-
-def parse_q(q_file: str) -> xr.Dataset:
-    _log.debug("Loading Q files")
-    return xr.open_mfdataset(q_file, decode_timedelta=False)[
-        ["e_1", "e_2", "pressure"]
-    ].load()
 
 
 def bin_q(

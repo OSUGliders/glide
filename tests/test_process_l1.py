@@ -26,6 +26,5 @@ def test_format_variables() -> None:
 
 
 def test_parse_l1() -> None:
-    config = load_config()
-    pl1.parse_l1(get_test_data("684", "sbd"), config)
-    pl1.parse_l1(get_test_data("684", "tbd"), config)
+    pl1.parse_l1(get_test_data("684", "sbd"))
+    pl1.parse_l1(get_test_data("684", "tbd"))
