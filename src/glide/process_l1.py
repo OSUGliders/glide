@@ -17,22 +17,6 @@ _log = logging.getLogger(__name__)
 # Helper functions
 
 
-def _load_l1_file(file: str | xr.Dataset) -> xr.Dataset:
-    if isinstance(file, str):
-        _log.debug("Parsing L1 %s", file)
-        try:
-            ds = xr.open_dataset(file, decode_timedelta=True).drop_dims("j").load()
-            _log.debug("xarray.open_dataset opened %s", file)
-        except ValueError:
-            ds = pd.read_csv(file).to_xarray()
-            _log.debug("pandas.read_csv opened %s", file)
-    elif isinstance(file, xr.Dataset):  # Primarily for testing
-        ds = file
-    else:
-        raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
-    return ds
-
-
 def _fix_time_varaiable_conflict(ds: xr.Dataset) -> xr.Dataset:
     """This fixes conflicting time variable names when parsing a combined flight/science data.
     Generally, they should be parsed separately."""
@@ -87,10 +71,24 @@ def _format_variables(
 # Public API functions
 
 
-def parse_l1(file: str | xr.Dataset, config: dict) -> xr.Dataset:
-    """Parses flight (sbd) or science (tbd) data processed by dbd2netcdf or dbd2csv."""
+def parse_l1(file: str | xr.Dataset) -> xr.Dataset:
+    if isinstance(file, str):
+        _log.debug("Parsing L1 %s", file)
+        try:
+            ds = xr.open_dataset(file, decode_timedelta=True).drop_dims("j").load()
+            _log.debug("xarray.open_dataset opened %s", file)
+        except ValueError:
+            ds = pd.read_csv(file).to_xarray()
+            _log.debug("pandas.read_csv opened %s", file)
+    elif isinstance(file, xr.Dataset):  # Primarily for testing
+        ds = file
+    else:
+        raise ValueError(f"Expected type str or xarray.Dataset but got {type(file)}")
+    return ds
 
-    ds = _load_l1_file(file)
+
+def format_l1(ds: xr.Dataset, config: dict) -> xr.Dataset:
+    """Parses flight (sbd) or science (tbd) data processed by dbd2netcdf or dbd2csv."""
 
     ds = _fix_time_varaiable_conflict(ds)
 

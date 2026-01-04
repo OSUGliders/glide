@@ -6,10 +6,11 @@ import logging
 from importlib.metadata import version
 from pathlib import Path
 
+import netCDF4 as nc
 import typer
 from typing_extensions import Annotated
 
-from . import config, hotel, process_l1, process_l2, process_l3
+from . import ancillery, config, hotel, process_l1, process_l2, process_l3
 
 _log = logging.getLogger(__name__)
 
@@ -86,7 +87,9 @@ def l1b(
     """
     conf = config.load_config(config_file)
 
-    ds = process_l1.parse_l1(file, conf)
+    ds = process_l1.parse_l1(file)
+
+    ds = process_l1.format_l1(ds, conf)
 
     ds = process_l1.apply_qc(ds, conf)
 
@@ -115,8 +118,11 @@ def l2(
     """
     conf = config.load_config(config_file)
 
-    flt = process_l1.parse_l1(flt_file, conf)
-    sci = process_l1.parse_l1(sci_file, conf)
+    flt = process_l1.parse_l1(flt_file)
+    sci = process_l1.parse_l1(sci_file)
+
+    flt = process_l1.format_l1(flt, conf)
+    sci = process_l1.format_l1(sci, conf)
 
     flt = process_l1.apply_qc(flt, conf)
     sci = process_l1.apply_qc(sci, conf)
@@ -163,7 +169,7 @@ def l3(
     if q_netcdf is not None:
         conf = config.load_config(config_file)
 
-        q = process_l3.parse_q(q_netcdf)
+        q = ancillery.parse_q(q_netcdf)
 
         out = process_l3.bin_q(out, q, bin_size, conf)
 
@@ -172,45 +178,69 @@ def l3(
 
 @app.command()
 @log_args
-def ml3(
-    l3_file: Annotated[str, typer.Argument(help="The L3 dataset.")],
-    out_file: _out_file_annotation = "slocum.l3.nc",
-    q_netcdf: Annotated[
-        str | None,
-        typer.Option("--q-in", "-q", help="netCDF file(s) processed by q2netcdf."),
-    ] = None,
+def merge(
+    glide_file: Annotated[
+        str, typer.Argument(help="A L2 or L3 dataset produced by glide.")
+    ],
+    input_file: Annotated[str, typer.Argument(help="Input file(s) of a given type.")],
+    file_type: Annotated[
+        str,
+        typer.Argument(
+            help="Choose 'q' for q2netcdf output file, 'p' for p for p2netcdf output file."
+        ),
+    ],
+    out_file: _out_file_annotation = "slocum.merged.nc",
     config_file: _config_annotation = None,
     overwrite: Annotated[
         bool,
         typer.Option(
             "--overwrite",
             "-w",
-            help="Overwrite the existing L3 dataset if it exists.",
+            help="Overwrite the existing dataset if it exists.",
         ),
     ] = False,
 ) -> None:
     """
-    Merge ancillary data into L3 data.
+    Merge ancillary data into L2 or L3 data.
     """
-    # I could remove the defaul argument to enforce this rule but I am anticipating that
-    # in the future we may want to merge other kinds of data into the L3 dataset.
-    if q_netcdf is None:
-        raise typer.BadParameter("The --q-in option is required for ml3 command.")
 
-    if not overwrite and Path(out_file).exists():
+    if file_type not in ["q", "p"]:
+        raise typer.BadParameter(f"The file type {file_type} must be q or p.")
+
+    if Path(out_file).exists() and not overwrite:
         raise typer.BadParameter(
             f"The output file {out_file} already exists. Use --overwrite to overwrite it."
         )
 
-    l3, bin_size = process_l3.parse_l3(l3_file)
+    # Figure out the processig level of the input
+    input_file_level = -1
+    ds = nc.Dataset(glide_file)
+    dataset_dims = set(ds.dimensions)
+    ds.close()
+
+    if dataset_dims == {"time"}:
+        input_file_level = 2
+    elif dataset_dims == {"profile_id", "z"}:
+        input_file_level = 3
+    else:
+        raise ValueError(
+            f"Could not determine processing level of input file {glide_file} with dimensions {dataset_dims}"
+        )
 
     conf = config.load_config(config_file)
 
-    q = process_l3.parse_q(q_netcdf)
-
-    out = process_l3.bin_q(l3, q, bin_size, conf)
-
-    out.to_netcdf(out_file)
+    if file_type == "q":
+        if input_file_level == 3:
+            l3, bin_size = process_l3.parse_l3(glide_file)
+            q = ancillery.parse_q(input_file)
+            out = process_l3.bin_q(l3, q, bin_size, conf)
+            out.to_netcdf(out_file)
+        else:
+            raise NotImplementedError(
+                "Merging q files only supported for level 3 data."
+            )
+    if file_type == "p":
+        raise NotImplementedError("Merging of p files is not yet supported.")
 
 
 @app.command()
@@ -260,7 +290,7 @@ def concat(
     """
     Concatenate multiple netCDF files along a dimension.
     """
-    ds = process_l3.concat(files, concat_dim=concat_dim)
+    ds = ancillery.concat(files, concat_dim=concat_dim)
 
     ds.to_netcdf(out_file)
 

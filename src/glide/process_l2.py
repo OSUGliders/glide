@@ -1,4 +1,4 @@
-# Level 3 processing of the level 2 processed data
+# Level 3 processing of the level 2 data
 # Data are binned in depth
 
 import logging
@@ -54,8 +54,8 @@ def _get_profile_indexes(ds: xr.Dataset) -> NDArray:
 # Public functions
 
 
-def parse_l2(l2_file: str) -> xr.Dataset:
-    return xr.open_dataset(l2_file, decode_timedelta=True).load()
+def parse_l2(file: str) -> xr.Dataset:
+    return xr.open_dataset(file, decode_timedelta=True).load()
 
 
 def bin_l2(
