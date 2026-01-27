@@ -1,4 +1,5 @@
 .DS_Store
+gliderdac*
 
 # Python-generated files
 __pycache__/

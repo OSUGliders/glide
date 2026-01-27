@@ -7,7 +7,9 @@ from importlib.metadata import version
 from pathlib import Path
 
 import netCDF4 as nc
+import numpy as np
 import typer
+import xarray as xr
 from typing_extensions import Annotated
 
 from . import ancillery, config, hotel, process_l1, process_l2, process_l3
@@ -118,10 +120,9 @@ def l2(
     """
     conf = config.load_config(config_file)
 
-    flt = process_l1.parse_l1(flt_file)
+    flt_raw = process_l1.parse_l1(flt_file)  # Keep raw for velocity extraction
+    flt = process_l1.format_l1(flt_raw.copy(), conf)
     sci = process_l1.parse_l1(sci_file)
-
-    flt = process_l1.format_l1(flt, conf)
     sci = process_l1.format_l1(sci, conf)
 
     flt = process_l1.apply_qc(flt, conf)
@@ -132,6 +133,10 @@ def l2(
     merged = process_l1.calculate_thermodynamics(merged, conf)
 
     out = process_l1.get_profiles(merged, shallowest_profile, profile_distance)
+
+    out = process_l1.assign_surface_state(out, flt=flt_raw)
+
+    out = process_l1.add_velocity(out, conf, flt=flt_raw)
 
     out = process_l1.enforce_types(out, conf)
 
@@ -293,6 +298,88 @@ def concat(
     ds = ancillery.concat(files, concat_dim=concat_dim)
 
     ds.to_netcdf(out_file)
+
+
+# @app.command()
+# @log_args
+# def backfill(
+#     flt_file: Annotated[
+#         str, typer.Argument(help="Flight file (sbd/dbd) with velocity data.")
+#     ],
+#     l2_dir: Annotated[
+#         str, typer.Argument(help="Directory containing L2 files to update.")
+#     ],
+#     lookback: Annotated[
+#         int, typer.Option("-n", help="Number of previous files to check.")
+#     ] = 3,
+#     tolerance: Annotated[
+#         float, typer.Option("-t", help="Max seconds after dive end.")
+#     ] = 300.0,
+# ) -> None:
+#     """
+#     Backfill depth-averaged velocity to previous L2 files missing this data.
+#     """
+#     l2_path = Path(l2_dir)
+#     flt = xr.open_dataset(flt_file, decode_timedelta=True).load()
+
+#     # Extract velocity data
+#     if "m_water_vx" not in flt and "m_water_vy" not in flt:
+#         typer.echo("No velocity data in flight file.")
+#         return
+
+#     time_flt = flt.m_present_time.values
+#     u_flt = (
+#         flt.m_water_vx.values if "m_water_vx" in flt else np.full_like(time_flt, np.nan)
+#     )
+#     v_flt = (
+#         flt.m_water_vy.values if "m_water_vy" in flt else np.full_like(time_flt, np.nan)
+#     )
+#     vel_valid = np.isfinite(u_flt) | np.isfinite(v_flt)
+
+#     if not vel_valid.any():
+#         typer.echo("No valid velocity data in flight file.")
+#         return
+
+#     vel_times = time_flt[vel_valid]
+#     vel_u = u_flt[vel_valid]
+#     vel_v = v_flt[vel_valid]
+#     flt.close()
+
+#     l2_files = sorted(
+#         l2_path.glob("*.nc"), key=lambda p: p.stat().st_mtime, reverse=True
+#     )
+#     l2_files = l2_files[:lookback]
+
+#     updated = []
+#     for l2_file in l2_files:
+#         with nc.Dataset(str(l2_file), "r+") as ds:
+#             if "time_uv" not in ds.variables or "u" not in ds.variables:
+#                 continue
+
+#             time_uv = ds.variables["time_uv"][:]
+#             u_vals = ds.variables["u"][:]
+#             v_vals = ds.variables["v"][:]
+
+#             file_updated = False
+#             for i, t_uv in enumerate(time_uv):
+#                 if np.isnan(u_vals[i]):
+#                     # Find last velocity within tolerance of this dive
+#                     match = (vel_times > t_uv - 3600) & (vel_times < t_uv + tolerance)
+#                     if match.any():
+#                         last_idx = np.where(match)[0][-1]
+#                         ds.variables["u"][i] = vel_u[last_idx]
+#                         ds.variables["v"][i] = vel_v[last_idx]
+#                         file_updated = True
+#                         _log.info("Updated dive %d in %s", i, l2_file)
+
+#             if file_updated and str(l2_file) not in updated:
+#                 updated.append(str(l2_file))
+
+#     if updated:
+#         for f in updated:
+#             typer.echo(f"Updated: {f}")
+#     else:
+#         typer.echo("No files updated.")
 
 
 @app.command()
