@@ -1,0 +1,5 @@
+i,sci_m_present_secs_into_mission,sci_m_present_time,sci_microrider_isdp_file_state,sci_water_cond,sci_water_pressure,sci_water_temp
+0,155589.05,1740751501.317,0,0.0,0.0,0.0
+1,155593.23,1740751505.5,0,,,
+2,155615.23,1740751527.5,0,,,
+3,155667.23,1740751579.5,-127,0.0,0.0,0.0

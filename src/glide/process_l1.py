@@ -86,6 +86,12 @@ def parse_l1(file: str | xr.Dataset) -> xr.Dataset:
             _log.debug("xarray.open_dataset opened %s", file)
         except ValueError:
             ds = pd.read_csv(file).to_xarray()
+            # Rename index dimension to 'i' for consistency with NC files
+            # Drop the 'i' variable if it exists
+            if "i" in ds.data_vars:
+                ds = ds.drop_vars("i")
+            if "index" in ds.dims:
+                ds = ds.rename({"index": "i"})
             _log.debug("pandas.read_csv opened %s", file)
     elif isinstance(file, xr.Dataset):  # Primarily for testing
         ds = file
@@ -497,18 +503,8 @@ def add_velocity(
 
     _log.debug("Found %d dive cycles from state transitions", n_cycles)
 
-    # Get flight data arrays for velocity lookup
-    if flt is not None and "m_water_vx" in flt and "m_water_vy" in flt:
-        time_flt = flt.m_present_time.values
-        u_flt = flt.m_water_vx.values
-        v_flt = flt.m_water_vy.values
-    else:
-        time_flt = None
-        u_flt = None
-        v_flt = None
-        _log.warning(
-            "No flight data with m_water_vx and m_water_vy, velocity will be NaN"
-        )
+    # Extract velocity data from flight data
+    vel_times, vel_u, vel_v = _extract_velocity_data(flt)
 
     time_l2 = ds.time.values
     lat_l2 = ds.lat.values
@@ -532,21 +528,16 @@ def add_velocity(
             lon_uv[i] = np.nanmean(cycle_lons)
 
         # Find velocity in the following surface period
-        if surf_start < 0 or time_flt is None:
+        if surf_start < 0 or vel_times is None:
             continue
 
-        t_surf_start = time_l2[surf_start]
-        t_surf_end = time_l2[surf_end - 1] if surf_end > surf_start else t_surf_start
+        t_start = time_l2[surf_start]
+        t_end = time_l2[surf_end - 1] + 60 if surf_end > surf_start else t_start + 60
 
-        # Look for velocity in flight data during surface period
-        vel_mask = (time_flt >= t_surf_start) & (time_flt <= t_surf_end + 60)
-        vel_valid = vel_mask & (np.isfinite(u_flt) | np.isfinite(v_flt))
-
-        if vel_valid.any():
-            # Take the last valid velocity (glider may recalculate multiple times)
-            last_vel_idx = np.where(vel_valid)[0][-1]
-            u[i] = u_flt[last_vel_idx]
-            v[i] = v_flt[last_vel_idx]
+        u_vel, v_vel = _find_velocity_in_window(vel_times, vel_u, vel_v, t_start, t_end)
+        if u_vel is not None:
+            u[i] = u_vel
+            v[i] = v_vel
             _log.debug("Cycle %d: assigned u=%.4f, v=%.4f", i, u[i], v[i])
 
     ds["time_uv"] = (("time_uv",), time_uv, specs["time_uv"]["CF"])
@@ -561,6 +552,191 @@ def add_velocity(
         np.isfinite(u).sum(),
     )
     return ds
+
+
+def _extract_velocity_data(
+    flt: xr.Dataset | None,
+) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+    """Extract valid velocity data from flight dataset.
+
+    Returns
+    -------
+    tuple of (times, u, v) arrays with only valid velocity points,
+    or (None, None, None) if no valid data.
+    """
+    if flt is None:
+        _log.warning("No flight data provided, velocity will be NaN")
+        return None, None, None
+
+    if "m_water_vx" not in flt or "m_water_vy" not in flt:
+        _log.warning("No m_water_vx/vy in flight data, velocity will be NaN")
+        return None, None, None
+
+    time_flt = flt.m_present_time.values
+    u_flt = flt.m_water_vx.values
+    v_flt = flt.m_water_vy.values
+
+    vel_valid = np.isfinite(u_flt) & np.isfinite(v_flt)
+    if not vel_valid.any():
+        _log.warning("No valid velocity data in flight data")
+        return None, None, None
+
+    return time_flt[vel_valid], u_flt[vel_valid], v_flt[vel_valid]
+
+
+def _find_velocity_in_window(
+    vel_times: np.ndarray | None,
+    vel_u: np.ndarray | None,
+    vel_v: np.ndarray | None,
+    t_start: float,
+    t_end: float,
+) -> tuple[float | None, float | None]:
+    """Find the last valid velocity estimate in a time window.
+
+    Parameters
+    ----------
+    vel_times : array
+        Times of valid velocity estimates.
+    vel_u, vel_v : array
+        Eastward and northward velocity values.
+    t_start, t_end : float
+        Time window to search (inclusive start, exclusive end).
+
+    Returns
+    -------
+    tuple of (u, v) or (None, None) if no velocity found.
+    """
+    if vel_times is None or vel_u is None or vel_v is None:
+        return None, None
+
+    match = (vel_times >= t_start) & (vel_times < t_end)
+    if match.any():
+        last_idx = np.where(match)[0][-1]
+        return vel_u[last_idx], vel_v[last_idx]
+
+    return None, None
+
+
+def backfill_velocity(
+    l2_file: str,
+    raw_files: list[str],
+    tolerance: float = 0.005,
+) -> bool:
+    """Backfill velocity data in an L2 file using raw flight data.
+
+    For each velocity estimate, searches raw flight data for velocity in a
+    time window starting at the end of the climb (last point with matching
+    climb_id after time_uv). Updates the value if it is missing (NaN) or if
+    the new estimate differs significantly from the existing one.
+
+    Parameters
+    ----------
+    l2_file : str
+        Path to L2 file to update.
+    raw_files : list of str
+        Paths to raw flight files (sbd/dbd) containing velocity data.
+    tolerance : float
+        Update existing velocity if difference exceeds this value (m/s).
+
+    Returns
+    -------
+    bool
+        True if the file was updated, False otherwise.
+    """
+    import netCDF4 as nc
+
+    raw_datasets = []
+    for rf in raw_files:
+        raw_datasets.append(parse_l1(rf))
+
+    if not raw_datasets:
+        _log.warning("No raw data could be loaded for backfill")
+        return False
+
+    flt = xr.concat(raw_datasets, dim="i")
+    vel_times, vel_u, vel_v = _extract_velocity_data(flt)
+
+    if vel_times is None:
+        return False
+
+    _log.debug("Found %d velocity estimates in raw data", len(vel_times))
+
+    # Update the L2 file
+    file_updated = False
+    with nc.Dataset(l2_file, "r+") as ds:
+        if "u" not in ds.variables or "v" not in ds.variables:
+            _log.warning("No velocity variables in %s", l2_file)
+            return False
+
+        if "climb_id" not in ds.variables:
+            _log.warning("No climb_id variable in %s", l2_file)
+            return False
+
+        time_l2 = ds.variables["time"][:]
+        time_uv = np.ma.filled(ds.variables["time_uv"][:], np.nan)
+        climb_id = np.ma.filled(ds.variables["climb_id"][:], -1)
+        u_vals = np.ma.filled(ds.variables["u"][:], np.nan)
+        v_vals = np.ma.filled(ds.variables["v"][:], np.nan)
+
+        n_uv = len(time_uv)
+        if n_uv == 0:
+            _log.debug("No time_uv values in %s", l2_file)
+            return False
+
+        for i in range(n_uv):
+            t_uv = time_uv[i]
+            if np.isnan(t_uv):
+                continue  # No valid time_uv for this cycle
+
+            # Find the last point with this climb_id after time_uv
+            climb_mask = (climb_id == i) & (time_l2 >= t_uv)
+            if not climb_mask.any():
+                _log.debug("No climb points after time_uv for cycle %d", i)
+                continue
+
+            # Search window starts at end of climb
+            t_start = time_l2[climb_mask][-1]
+
+            # Search window ends at next valid time_uv (or +10 min)
+            if i + 1 < n_uv and np.isfinite(time_uv[i + 1]):
+                t_end = time_uv[i + 1]
+            else:
+                t_end = t_start + 600  # 10 minutes max
+
+            u_vel, v_vel = _find_velocity_in_window(
+                vel_times, vel_u, vel_v, t_start, t_end
+            )
+            if u_vel is None:
+                continue
+
+            # Check if update is needed (missing or significantly different)
+            if u_vel is None or v_vel is None:
+                continue
+
+            u_old, v_old = u_vals[i], v_vals[i]
+            is_missing = np.isnan(u_old) or np.isnan(v_old)
+            is_different = (
+                not is_missing
+                and (abs(u_vel - u_old) > tolerance or abs(v_vel - v_old) > tolerance)
+            )
+
+            if is_missing or is_different:
+                ds.variables["u"][i] = u_vel
+                ds.variables["v"][i] = v_vel
+                file_updated = True
+                if is_missing:
+                    _log.info("Backfilled cycle %d: u=%.4f, v=%.4f", i, u_vel, v_vel)
+                else:
+                    _log.info(
+                        "Updated cycle %d: u=%.4f->%.4f, v=%.4f->%.4f",
+                        i,
+                        u_old,
+                        u_vel,
+                        v_old,
+                        v_vel,
+                    )
+
+    return file_updated
 
 
 def enforce_types(ds: xr.Dataset, config: dict) -> xr.Dataset:

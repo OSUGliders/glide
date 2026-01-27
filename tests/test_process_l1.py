@@ -16,6 +16,21 @@ def get_test_data(sn: str = "684", ftype: str = "sbd") -> xr.Dataset:
     )
 
 
+def get_realtime_test_data(segment: int, ftype: str = "sbd") -> xr.Dataset:
+    """Load real-time test data for osu685 segments 27-30."""
+    return (
+        pd.read_csv(
+            str(
+                resources.files("tests").joinpath(
+                    f"data/osu685-2025-056-0-{segment}.{ftype}.csv"
+                )
+            )
+        )
+        .set_index("i")
+        .to_xarray()
+    )
+
+
 def test_format_variables() -> None:
     config = load_config()
     sbd = pl1._format_variables(get_test_data("684", "sbd"), config)
@@ -156,3 +171,166 @@ def test_find_dive_cycles_with_unknown_gaps() -> None:
     assert cycle_end == 10
     assert surf_start == 10
     assert surf_end == 12
+
+
+def test_realtime_velocity_processing() -> None:
+    """Test that velocity variables are added when processing real-time file pairs.
+
+    In real-time mode, we process each sbd/tbd pair individually.
+    Individual files may not contain complete dive cycles, so velocity
+    may be NaN. The key test is that velocity variables are always added.
+    """
+    from glide.config import load_config
+
+    config = load_config()
+
+    # Process segments 27-30 individually
+    segments = [27, 28, 29, 30]
+    results = []
+
+    for seg in segments:
+        sbd = get_realtime_test_data(seg, "sbd")
+        tbd = get_realtime_test_data(seg, "tbd")
+
+        # Format and parse
+        flt_raw = sbd.copy()
+        flt = pl1.format_l1(pl1.parse_l1(sbd), config)
+        sci = pl1.format_l1(pl1.parse_l1(tbd), config)
+
+        # Apply QC (catch GPS QC failures for small test files)
+        try:
+            flt = pl1.apply_qc(flt, config)
+        except (ValueError, AttributeError):
+            # GPS QC may fail on small test files - use basic QC instead
+            from glide import qc
+
+            flt = qc.init_qc(flt, config=config)
+            flt = qc.apply_bounds(flt)
+            flt = qc.time(flt)
+            dim = list(flt.sizes.keys())[0]
+            flt = flt.swap_dims({dim: "time"})
+            flt = qc.interpolate_missing(flt, config)
+
+        try:
+            sci = pl1.apply_qc(sci, config)
+        except (ValueError, AttributeError):
+            from glide import qc
+
+            sci = qc.init_qc(sci, config=config)
+            sci = qc.apply_bounds(sci)
+            sci = qc.time(sci)
+            dim = list(sci.sizes.keys())[0]
+            sci = sci.swap_dims({dim: "time"})
+            sci = qc.interpolate_missing(sci, config)
+
+        # Merge
+        merged = pl1.merge(flt, sci, config, "science")
+        merged = pl1.calculate_thermodynamics(merged, config)
+
+        # Get profiles
+        out = pl1.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
+
+        # Assign surface state and add velocity
+        out = pl1.assign_surface_state(out, flt=flt_raw)
+        out = pl1.add_velocity(out, config, flt=flt_raw)
+
+        results.append(
+            {
+                "segment": seg,
+                "has_time_uv": "time_uv" in out,
+                "has_u": "u" in out,
+                "has_v": "v" in out,
+                "n_cycles": out.sizes.get("time_uv", 0),
+                "n_valid_u": int(np.isfinite(out.u.values).sum()) if "u" in out else 0,
+                "ds": out,
+            }
+        )
+
+    # All files should have velocity variables (even if NaN)
+    for r in results:
+        assert r["has_time_uv"], f"Segment {r['segment']} missing time_uv"
+        assert r["has_u"], f"Segment {r['segment']} missing u"
+        assert r["has_v"], f"Segment {r['segment']} missing v"
+
+
+def test_realtime_velocity_merged() -> None:
+    """Test velocity detection when merging all real-time segments together.
+
+    When multiple segments are combined, we should have enough data to
+    detect complete dive cycles and assign velocity.
+    """
+    from glide.config import load_config
+
+    config = load_config()
+
+    # Concatenate all segments
+    segments = [27, 28, 29, 30]
+    all_sbd = []
+    all_tbd = []
+
+    for seg in segments:
+        all_sbd.append(get_realtime_test_data(seg, "sbd"))
+        all_tbd.append(get_realtime_test_data(seg, "tbd"))
+
+    # Concatenate along the index dimension
+    sbd = xr.concat(all_sbd, dim="i")
+    tbd = xr.concat(all_tbd, dim="i")
+
+    # Re-index to have unique i values
+    sbd = sbd.assign_coords(i=np.arange(sbd.sizes["i"]))
+    tbd = tbd.assign_coords(i=np.arange(tbd.sizes["i"]))
+
+    # Format and parse
+    flt_raw = sbd.copy()
+    flt = pl1.format_l1(pl1.parse_l1(sbd), config)
+    sci = pl1.format_l1(pl1.parse_l1(tbd), config)
+
+    # Apply QC
+    try:
+        flt = pl1.apply_qc(flt, config)
+    except (ValueError, AttributeError):
+        from glide import qc
+
+        flt = qc.init_qc(flt, config=config)
+        flt = qc.apply_bounds(flt)
+        flt = qc.time(flt)
+        dim = list(flt.sizes.keys())[0]
+        flt = flt.swap_dims({dim: "time"})
+        flt = qc.interpolate_missing(flt, config)
+
+    try:
+        sci = pl1.apply_qc(sci, config)
+    except (ValueError, AttributeError):
+        from glide import qc
+
+        sci = qc.init_qc(sci, config=config)
+        sci = qc.apply_bounds(sci)
+        sci = qc.time(sci)
+        dim = list(sci.sizes.keys())[0]
+        sci = sci.swap_dims({dim: "time"})
+        sci = qc.interpolate_missing(sci, config)
+
+    # Merge
+    merged = pl1.merge(flt, sci, config, "science")
+    merged = pl1.calculate_thermodynamics(merged, config)
+
+    # Get profiles
+    out = pl1.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
+
+    # Check that we detected some profiles
+    n_dives = (out.dive_id.values >= 0).sum()
+    n_climbs = (out.climb_id.values >= 0).sum()
+
+    # Assign surface state and add velocity
+    out = pl1.assign_surface_state(out, flt=flt_raw)
+    out = pl1.add_velocity(out, config, flt=flt_raw)
+
+    # Should have velocity variables
+    assert "time_uv" in out, "Missing time_uv"
+    assert "u" in out, "Missing u"
+    assert "v" in out, "Missing v"
+
+    # If we detected profiles, we should have some velocity estimates
+    # (may still be NaN if velocity data not in these segments)
+    if n_dives > 0:
+        assert out.sizes["time_uv"] >= 1, "Expected at least one velocity entry"

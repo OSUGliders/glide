@@ -298,86 +298,122 @@ def concat(
     ds.to_netcdf(out_file)
 
 
-# @app.command()
-# @log_args
-# def backfill(
-#     flt_file: Annotated[
-#         str, typer.Argument(help="Flight file (sbd/dbd) with velocity data.")
-#     ],
-#     l2_dir: Annotated[
-#         str, typer.Argument(help="Directory containing L2 files to update.")
-#     ],
-#     lookback: Annotated[
-#         int, typer.Option("-n", help="Number of previous files to check.")
-#     ] = 3,
-#     tolerance: Annotated[
-#         float, typer.Option("-t", help="Max seconds after dive end.")
-#     ] = 300.0,
-# ) -> None:
-#     """
-#     Backfill depth-averaged velocity to previous L2 files missing this data.
-#     """
-#     l2_path = Path(l2_dir)
-#     flt = xr.open_dataset(flt_file, decode_timedelta=True).load()
+@app.command()
+@log_args
+def backfill(
+    l2_files: Annotated[
+        list[str], typer.Argument(help="L2 files to check for missing velocity.")
+    ],
+    raw_dir: Annotated[
+        str,
+        typer.Option("-r", "--raw-dir", help="Directory containing raw sbd/dbd files."),
+    ],
+    extra_files: Annotated[
+        int,
+        typer.Option(
+            "-n",
+            "--extra",
+            help="Number of extra raw files to load after last L2 file.",
+        ),
+    ] = 3,
+) -> None:
+    """
+    Backfill depth-averaged velocity to L2 files.
 
-#     # Extract velocity data
-#     if "m_water_vx" not in flt and "m_water_vy" not in flt:
-#         typer.echo("No velocity data in flight file.")
-#         return
+    Uses the glider state variable in L2 files to identify dive cycles, then
+    looks up velocity from the corresponding raw flight files. Updates velocity
+    if missing or if the new estimate differs significantly from the existing one.
 
-#     time_flt = flt.m_present_time.values
-#     u_flt = (
-#         flt.m_water_vx.values if "m_water_vx" in flt else np.full_like(time_flt, np.nan)
-#     )
-#     v_flt = (
-#         flt.m_water_vy.values if "m_water_vy" in flt else np.full_like(time_flt, np.nan)
-#     )
-#     vel_valid = np.isfinite(u_flt) | np.isfinite(v_flt)
+    File naming convention: L2 files should be named like 'basename.l2.nc'
+    where 'basename.sbd.nc' or 'basename.dbd.nc' is the corresponding raw file.
+    """
+    raw_path = Path(raw_dir)
+    conf = config.load_config()
 
-#     if not vel_valid.any():
-#         typer.echo("No valid velocity data in flight file.")
-#         return
+    # Sort L2 files by name to ensure chronological order
+    l2_files_sorted = sorted([Path(f) for f in l2_files])
 
-#     vel_times = time_flt[vel_valid]
-#     vel_u = u_flt[vel_valid]
-#     vel_v = v_flt[vel_valid]
-#     flt.close()
+    # Filter to files that have velocity variables
+    files_to_update = []
+    for l2_file in l2_files_sorted:
+        try:
+            with nc.Dataset(str(l2_file), "r") as ds:
+                if "time_uv" in ds.variables:
+                    files_to_update.append(l2_file)
+        except Exception as e:
+            _log.warning("Could not read %s: %s", l2_file, e)
+            continue
 
-#     l2_files = sorted(
-#         l2_path.glob("*.nc"), key=lambda p: p.stat().st_mtime, reverse=True
-#     )
-#     l2_files = l2_files[:lookback]
+    if not files_to_update:
+        typer.echo("No L2 files with time_uv variable found.")
+        return
 
-#     updated = []
-#     for l2_file in l2_files:
-#         with nc.Dataset(str(l2_file), "r+") as ds:
-#             if "time_uv" not in ds.variables or "u" not in ds.variables:
-#                 continue
+    typer.echo(f"Processing {len(files_to_update)} L2 files.")
 
-#             time_uv = ds.variables["time_uv"][:]
-#             u_vals = ds.variables["u"][:]
-#             v_vals = ds.variables["v"][:]
+    # Extract base names from L2 files (remove .l2.nc suffix)
+    def get_base_name(l2_file: Path) -> str:
+        name = l2_file.name
+        for suffix in [".l2.nc", ".L2.nc", ".nc"]:
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name.rsplit(".", 1)[0]
 
-#             file_updated = False
-#             for i, t_uv in enumerate(time_uv):
-#                 if np.isnan(u_vals[i]):
-#                     # Find last velocity within tolerance of this dive
-#                     match = (vel_times > t_uv - 3600) & (vel_times < t_uv + tolerance)
-#                     if match.any():
-#                         last_idx = np.where(match)[0][-1]
-#                         ds.variables["u"][i] = vel_u[last_idx]
-#                         ds.variables["v"][i] = vel_v[last_idx]
-#                         file_updated = True
-#                         _log.info("Updated dive %d in %s", i, l2_file)
+    first_base = get_base_name(files_to_update[0])
+    last_base = get_base_name(files_to_update[-1])
 
-#             if file_updated and str(l2_file) not in updated:
-#                 updated.append(str(l2_file))
+    # Get all sbd/dbd files in raw directory, sorted
+    # Look for .sbd.nc, .sbd.csv, .dbd.nc, .dbd.csv patterns
+    raw_files = sorted(
+        list(raw_path.glob("*.sbd.nc"))
+        + list(raw_path.glob("*.sbd.csv"))
+        + list(raw_path.glob("*.dbd.nc"))
+        + list(raw_path.glob("*.dbd.csv"))
+    )
 
-#     if updated:
-#         for f in updated:
-#             typer.echo(f"Updated: {f}")
-#     else:
-#         typer.echo("No files updated.")
+    if not raw_files:
+        typer.echo(f"No raw flight files found in {raw_dir}")
+        return
+
+    # Extract base names from raw files (remove .sbd.nc, .sbd.csv, etc.)
+    def get_raw_base_name(raw_file: Path) -> str:
+        name = raw_file.name
+        for suffix in [".sbd.nc", ".sbd.csv", ".dbd.nc", ".dbd.csv", ".tbd.nc", ".tbd.csv"]:
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name.rsplit(".", 1)[0]
+
+    raw_names = [get_raw_base_name(f) for f in raw_files]
+
+    # Find indices of first and last files to load using exact base name match
+    try:
+        first_idx = raw_names.index(first_base)
+    except ValueError:
+        typer.echo(f"Could not find raw file matching {first_base}")
+        return
+
+    try:
+        last_idx = raw_names.index(last_base)
+    except ValueError:
+        last_idx = first_idx
+
+    # Load from first to last + extra_files
+    end_idx = min(last_idx + extra_files + 1, len(raw_files))
+    raw_files_to_load = [str(f) for f in raw_files[first_idx:end_idx]]
+
+    typer.echo(f"Loading {len(raw_files_to_load)} raw flight files...")
+
+    # Update each L2 file
+    updated = []
+    for l2_file in files_to_update:
+        if process_l1.backfill_velocity(str(l2_file), raw_files_to_load):
+            updated.append(str(l2_file))
+
+    if updated:
+        typer.echo(f"\nUpdated {len(updated)} files:")
+        for f in updated:
+            typer.echo(f"  {f}")
+    else:
+        typer.echo("No files were updated.")
 
 
 @app.command()

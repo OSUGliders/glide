@@ -378,7 +378,8 @@ def gps(ds: xr.Dataset, dt: float = 600) -> xr.Dataset:
         lat[in_gap] = la + dla
 
     changed = np.full(lon.shape, False)
-    changed[np.hstack(idx_changed)] = True
+    if idx_changed:
+        changed[np.hstack(idx_changed)] = True
 
     ds["lon"] = (ds.lon.dims, lon, ds.lon.attrs)
     ds["lat"] = (ds.lat.dims, lat, ds.lat.attrs)
