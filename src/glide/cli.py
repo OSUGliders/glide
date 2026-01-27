@@ -377,7 +377,14 @@ def backfill(
     # Extract base names from raw files (remove .sbd.nc, .sbd.csv, etc.)
     def get_raw_base_name(raw_file: Path) -> str:
         name = raw_file.name
-        for suffix in [".sbd.nc", ".sbd.csv", ".dbd.nc", ".dbd.csv", ".tbd.nc", ".tbd.csv"]:
+        for suffix in [
+            ".sbd.nc",
+            ".sbd.csv",
+            ".dbd.nc",
+            ".dbd.csv",
+            ".tbd.nc",
+            ".tbd.csv",
+        ]:
             if name.endswith(suffix):
                 return name[: -len(suffix)]
         return name.rsplit(".", 1)[0]

@@ -715,9 +715,8 @@ def backfill_velocity(
 
             u_old, v_old = u_vals[i], v_vals[i]
             is_missing = np.isnan(u_old) or np.isnan(v_old)
-            is_different = (
-                not is_missing
-                and (abs(u_vel - u_old) > tolerance or abs(v_vel - v_old) > tolerance)
+            is_different = not is_missing and (
+                abs(u_vel - u_old) > tolerance or abs(v_vel - v_old) > tolerance
             )
 
             if is_missing or is_different:
