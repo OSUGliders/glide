@@ -7,9 +7,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 import netCDF4 as nc
-import numpy as np
 import typer
-import xarray as xr
 from typing_extensions import Annotated
 
 from . import ancillery, config, hotel, process_l1, process_l2, process_l3
