@@ -425,7 +425,7 @@ def backfill(
 @app.command()
 @log_args
 def cfg(
-    out_file: _out_file_annotation = "default.config.yaml",
+    out_file: _out_file_annotation = "default.config.yml",
 ) -> None:
     """
     Output the default configuration file.
