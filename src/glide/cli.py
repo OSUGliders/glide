@@ -328,7 +328,6 @@ def backfill(
     where 'basename.sbd.nc' or 'basename.dbd.nc' is the corresponding raw file.
     """
     raw_path = Path(raw_dir)
-    conf = config.load_config()
 
     # Sort L2 files by name to ensure chronological order
     l2_files_sorted = sorted([Path(f) for f in l2_files])
