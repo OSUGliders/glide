@@ -45,11 +45,11 @@ def _load_core() -> tuple[dict, dict, dict]:
     with open(core_file) as f:
         docs = [doc for doc in safe_load_all(f)]
 
-    core_variables = docs[0] if docs else {}
-    flight_attitude = docs[1] if len(docs) > 1 else {}
-    derived_thermo = docs[2] if len(docs) > 2 else {}
+    core = docs[0] if docs else {}
+    flight = docs[1] if len(docs) > 1 else {}
+    thermo = docs[2] if len(docs) > 2 else {}
 
-    return core_variables, flight_attitude, derived_thermo
+    return core, flight, thermo
 
 
 def _apply_qc_overrides(variables: dict, qc_overrides: dict) -> dict:
@@ -121,7 +121,7 @@ def load_config(file: str | None = None) -> dict:
         - merged_variables: variables for higher-level processing
     """
     # Load core definitions
-    core_variables, flight_attitude, derived_thermo = _load_core()
+    core, flight, thermo = _load_core()
 
     # Load user config
     if file is None:
@@ -141,18 +141,18 @@ def load_config(file: str | None = None) -> dict:
 
     # Extract include toggles (default to True for backward compatibility)
     include = include_config.get("include", {})
-    include_flight = include.get("flight_attitude", True)
-    include_thermo = include.get("derived_thermo", True)
+    include_flight = include.get("flight", True)
+    include_thermo = include.get("thermo", True)
 
     # Build variable set: start with core
-    variables = copy.deepcopy(core_variables)
+    variables = copy.deepcopy(core)
 
     # Add optional suites if enabled
     if include_flight:
-        variables.update(copy.deepcopy(flight_attitude))
+        variables.update(copy.deepcopy(flight))
         _log.debug("Including flight_attitude suite")
     if include_thermo:
-        variables.update(copy.deepcopy(derived_thermo))
+        variables.update(copy.deepcopy(thermo))
         _log.debug("Including derived_thermo suite")
 
     # Apply QC overrides
@@ -193,6 +193,10 @@ def load_config(file: str | None = None) -> dict:
         variables=variables,
         slocum=slocum_name_map,
         merged_variables=merged_vars,
+        include=dict(
+            flight=include_flight,
+            thermo=include_thermo,
+        ),
     )
 
     return config
