@@ -206,7 +206,7 @@ def merge(
 
 def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     """Should be applied after merging flight and science.
-    
+
     Skips calculation if thermo suite is disabled in config.
     """
     if not config.get("include", {}).get("thermo", True):
