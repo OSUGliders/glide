@@ -117,7 +117,7 @@ def l2(
         "-r", "--riot-csv",
         help="File path to output a RIOT-compatible CSV file in addition "
              "to netCDF.")] =
-    None,
+    '',
     riot_add_positions: Annotated[bool, typer.Option(
         "--riot-positions",
         help="Interpolate and add latitude and longitude into RIOT CSV output.")] = False,
