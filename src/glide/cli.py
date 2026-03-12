@@ -8,6 +8,7 @@ from pathlib import Path
 
 import netCDF4 as nc
 import typer
+from typing import Union
 from typing_extensions import Annotated
 
 from . import ancillery, config, hotel, process_l1, process_l2, process_l3
@@ -112,6 +113,14 @@ def l2(
             "-d", help="Minimum distance between profiles in number of data points."
         ),
     ] = 20,
+    riot_csv: Annotated[str, typer.Option(
+        "-r", "--riot-csv",
+        help="File path to output a RIOT-compatible CSV file in addition "
+             "to netCDF.")] =
+    None,
+    riot_add_positions: Annotated[bool, typer.Option(
+        "--riot-positions",
+        help="Interpolate and add latitude and longitude into RIOT CSV output.")] = False,
 ) -> None:
     """
     Generate L2 data from L1 data.
@@ -143,6 +152,10 @@ def l2(
     out.encoding["unlimited_dims"] = {}
 
     out.to_netcdf(out_file)
+
+    if riot_csv:
+        from .riot_csv_writer import write_riot_csv
+        write_riot_csv(out, riot_add_positions, riot_csv)
 
 
 @app.command()
