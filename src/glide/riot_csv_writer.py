@@ -14,9 +14,32 @@ TS_DIFF_THRESHOLD = 20  # seconds
 
 def write_riot_csv(
         ds: xr.Dataset, add_positions: bool, output_path: str) -> None:
-    """Write xarray Dataset to CSV format compatible with RIOT.
-
-    RIOT expects a CSV with columns: timestamp, variable_name, value
+    """Write xarray Dataset to a RIOT `$riotData`-style CSV file.
+    The output is a wide, record-oriented CSV (one row per ping) whose
+    columns correspond to the fixed RIOT variables expected in a
+    `$riotData` file format.
+    At a minimum, this function writes the following RIOT ping fields
+    as individual columns:
+    - ``sr_ping_epoch_days``
+    - ``sr_ping_secs``
+    - ``sr_ping_msecs``
+    - ``sr_ping_rt_msecs``
+    - ``sr_ping_freq``
+    - ``sr_ping_detection_level``
+    - ``sr_ping_sequence_number``
+    - ``sr_ping_platform_id``
+    - ``sr_ping_slot``
+    - ``sr_ping_group``
+    - ``sr_platform_state``
+    - ``sr_num_records_in_file``
+    If ``add_positions`` is True and the dataset contains them, the
+    following position variables are also included as additional
+    columns:
+    - ``depth``
+    - ``lat``
+    - ``lon``
+    The resulting CSV, containing one record per ping with these
+    columns, is written to ``output_path``.
     """
     _log.debug(f'Gathering RIOT variables for CSV {output_path}')
     riot_vars = [
@@ -120,16 +143,11 @@ def write_riot_csv(
                 f'Threshold:{TS_DIFF_THRESHOLD} from glider timestamps. '
                 f"Using record's coordinates instead of interpolating.")
             riot_df['depth'] = position_ds['depth']
-            riot_df['latitude'] = position_ds['lat']
-            riot_df['longitude'] = position_ds['lon']
+            riot_df['lat'] = position_ds['lat']
+            riot_df['lon'] = position_ds['lon']
 
     # Write to CSV
     _log.debug('Writing to RIOT CSV')
     riot_df.to_csv(
         output_path, index=False, header=False,
         lineterminator='\n', mode='a')
-
-
-def _interpolate_to_riot_timestamps(ds: xr.Dataset, config: dict) -> xr.Dataset:
-    """Interpolate dataset to RIOT timestamps if specified in config."""
-    pass

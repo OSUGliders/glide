@@ -113,14 +113,14 @@ def l2(
             "-d", help="Minimum distance between profiles in number of data points."
         ),
     ] = 20,
-    riot_csv: Annotated[str, typer.Option(
+    riot_csv: Annotated[Union[str | None], typer.Option(
         "-r", "--riot-csv",
         help="File path to output a RIOT-compatible CSV file in addition "
-             "to netCDF.")] =
-    '',
+             "to netCDF.")] = None,
     riot_add_positions: Annotated[bool, typer.Option(
         "--riot-positions",
-        help="Interpolate and add latitude and longitude into RIOT CSV output.")] = False,
+        help="Interpolate and add depth, latitude, and longitude into RIOT CSV "
+             "output.")] = False,
 ) -> None:
     """
     Generate L2 data from L1 data.
