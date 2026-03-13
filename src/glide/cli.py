@@ -114,7 +114,7 @@ def l2(
         ),
     ] = 20,
     riot_csv: Annotated[
-        Union[str | None],
+        str | None,
         typer.Option(
             "-r",
             "--riot-csv",
