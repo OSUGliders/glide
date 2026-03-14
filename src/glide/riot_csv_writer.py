@@ -2,6 +2,7 @@ import logging
 import os
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 _log = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
     # converting everything to Int64 type makes it all integers but with
     # 'NA' as a missing value, which will fill in as blank in the CSV.
     riot_df = riot_ds.to_pandas().astype("Int64")
+    assert isinstance(riot_df, pd.DataFrame), "Expected DataFrame from multi-var Dataset"
 
     # drop the columns used to create epoch_msecs
     riot_df = riot_df.drop(
