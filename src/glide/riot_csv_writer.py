@@ -2,15 +2,9 @@ import logging
 import os
 
 import numpy as np
-import pandas as pd
 import xarray as xr
 
 _log = logging.getLogger(__name__)
-
-# Timestamp difference threshold:
-#   The limit that the riot timestamp must be from the glider timestamp
-#   to be considered close enough to interpolate position variables.
-TS_DIFF_THRESHOLD = 20  # seconds
 
 
 def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> None:
@@ -31,7 +25,6 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
     - ``sr_ping_slot``
     - ``sr_ping_group``
     - ``sr_platform_state``
-    - ``sr_num_records_in_file``
     If ``add_positions`` is True and the dataset contains them, the
     following position variables are also included as additional
     columns:
@@ -64,7 +57,7 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
     # Drop any variables that are not needed for RIOT output
     vars_to_drop = set(ds.variables).difference(riot_vars)
     riot_ds = ds.drop_vars(vars_to_drop)
-    if riot_ds.sizes == 0:
+    if riot_ds.sizes.get("time", 0) == 0:
         _log.error("No RIOT data available to create the CSV")
         return
 
@@ -98,18 +91,17 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
     )
 
     # rename columns to match headers in RIOT Data User Manual
-    riot_df.columns = pd.Index(
-        [
-            "rtMsecs",
-            "freq",
-            "detectionLevel",
-            "sequenceNumber",
-            "platformId",
-            "slot",
-            "group",
-            "platformState",
-        ]
-    )
+    csv_columns_map = {
+        "sr_ping_rt_msecs": "rtMsecs",
+        "sr_ping_freq": "freq",
+        "sr_ping_detection_level": "detectionLevel",
+        "sr_ping_sequence_number": "sequenceNumber",
+        "sr_ping_platform_id": "platformId",
+        "sr_ping_slot": "slot",
+        "sr_ping_group": "group",
+        "sr_platform_state": "platformState",
+    }
+    riot_df = riot_df.rename(columns=csv_columns_map)
 
     # Add the additional columns
     riot_df.insert(loc=0, column="epochMsecs", value=epoch_msecs)
@@ -178,37 +170,35 @@ def _add_positions(ds, riot_df, rows_to_keep):
         np.isfinite(position_ds["lat"]), np.isfinite(position_ds["lon"])
     )
 
-    if np.sum(q_depth) == 0:
-        _log.warning("No valid depths found. adding blank positions")
-        riot_df["depth"] = depth
-        riot_df["lat"] = lat
-        riot_df["lon"] = lon
-        return riot_df
-
-    _log.debug(
-        "Interpolating position variables to RIOT timestamps that fall "
-        "within the glider position time boundaries"
-    )
-
     # Only interpolate to timestamps that fall within the time boundaries
     # of the available glider position data. Any that fall outside
     # will be NaNs and ultimately blanks in the CSV file.
-    qdepth_in_tbnds = np.logical_and(
-        riot_ts >= glider_ts[q_depth][0], riot_ts <= glider_ts[q_depth][-1]
-    )
-    qpos_in_tbnds = np.logical_and(
-        riot_ts >= glider_ts[q_pos][0], riot_ts <= glider_ts[q_pos][-1]
-    )
+    if not q_depth.values.any():
+        _log.warning("No valid depths found. Adding blank depths")
+    else:
+        _log.debug(
+            "Interpolating depth variable to RIOT timestamps that fall "
+            "within the glider depth time boundaries"
+        )
+        qdepth_in_tbnds = np.logical_and(
+            riot_ts >= glider_ts[q_depth][0], riot_ts <= glider_ts[q_depth][-1]
+        )
+        depth[qdepth_in_tbnds] = np.interp(
+            riot_ts[qdepth_in_tbnds], glider_ts[q_depth], position_ds["depth"][q_depth]
+        )
 
-    depth[qdepth_in_tbnds] = np.interp(
-        riot_ts[qdepth_in_tbnds], glider_ts[q_depth], position_ds["depth"][q_depth]
-    )
-    lat[qpos_in_tbnds] = np.interp(
-        riot_ts[qpos_in_tbnds], glider_ts[q_pos], position_ds["lat"][q_pos]
-    )
-    lon[qpos_in_tbnds] = np.interp(
-        riot_ts[qpos_in_tbnds], glider_ts[q_pos], position_ds["lon"][q_pos]
-    )
+    if not q_pos.values.any():
+        _log.warning("No valid positions found. Adding blank positions")
+    else:
+        qpos_in_tbnds = np.logical_and(
+            riot_ts >= glider_ts[q_pos][0], riot_ts <= glider_ts[q_pos][-1]
+        )
+        lat[qpos_in_tbnds] = np.interp(
+            riot_ts[qpos_in_tbnds], glider_ts[q_pos], position_ds["lat"][q_pos]
+        )
+        lon[qpos_in_tbnds] = np.interp(
+            riot_ts[qpos_in_tbnds], glider_ts[q_pos], position_ds["lon"][q_pos]
+        )
 
     riot_df["depth"] = depth
     riot_df["lat"] = lat
