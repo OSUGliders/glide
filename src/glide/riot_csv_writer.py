@@ -90,8 +90,7 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
 
     # converting everything to Int64 type makes it all integers but with
     # 'NA' as a missing value, which will fill in as blank in the CSV.
-    riot_df = riot_ds.to_pandas().astype("Int64")
-    assert isinstance(riot_df, pd.DataFrame), "Expected DataFrame from multi-var Dataset"
+    riot_df = riot_ds.to_dataframe().astype("Int64")
 
     # drop the columns used to create epoch_msecs
     riot_df = riot_df.drop(
@@ -99,7 +98,7 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
     )
 
     # rename columns to match headers in RIOT Data User Manual
-    riot_df.columns = [
+    riot_df.columns = pd.Index([
         "rtMsecs",
         "freq",
         "detectionLevel",
@@ -108,7 +107,7 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
         "slot",
         "group",
         "platformState",
-    ]
+    ])
 
     # Add the additional columns
     riot_df.insert(loc=0, column="epochMsecs", value=epoch_msecs)
