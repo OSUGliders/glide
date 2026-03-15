@@ -98,16 +98,18 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
     )
 
     # rename columns to match headers in RIOT Data User Manual
-    riot_df.columns = pd.Index([
-        "rtMsecs",
-        "freq",
-        "detectionLevel",
-        "sequenceNumber",
-        "platformId",
-        "slot",
-        "group",
-        "platformState",
-    ])
+    riot_df.columns = pd.Index(
+        [
+            "rtMsecs",
+            "freq",
+            "detectionLevel",
+            "sequenceNumber",
+            "platformId",
+            "slot",
+            "group",
+            "platformState",
+        ]
+    )
 
     # Add the additional columns
     riot_df.insert(loc=0, column="epochMsecs", value=epoch_msecs)
