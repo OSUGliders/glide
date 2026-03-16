@@ -106,7 +106,7 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
     # Add the additional columns
     riot_df.insert(loc=0, column="epochMsecs", value=epoch_msecs)
     riot_df.insert(loc=0, column="riotDataPrefix", value="$riotData")
-    # riot_df['recNumInFile'] = np.nan  # unused record number in file.
+    riot_df["recNumInFile"] = 65535  # unused record number in file.
 
     if add_positions:
         riot_df = _add_positions(ds, riot_df, rows_to_keep)

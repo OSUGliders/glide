@@ -95,6 +95,7 @@ class TestWriteRiotCsv:
             "slot",
             "group",
             "platformState",
+            "recNumInFile",
         ]
         assert list(df.columns) == expected
 
