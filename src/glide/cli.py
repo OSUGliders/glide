@@ -5,7 +5,6 @@ import inspect
 import logging
 from importlib.metadata import version
 from pathlib import Path
-from typing import Union
 
 import netCDF4 as nc
 import typer
@@ -114,7 +113,7 @@ def l2(
         ),
     ] = 20,
     riot_csv: Annotated[
-        Union[str | None],
+        str | None,
         typer.Option(
             "-r",
             "--riot-csv",

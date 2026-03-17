@@ -1,24 +1,10 @@
-"""Tests for the riot_csv_writer module and the --riot-csv / --riot-positions
-CLI options on the ``l2`` command.
-
-This file is self-contained so it can be removed cleanly if the tests
-are no longer wanted.
-"""
-# Author: Claude Opus 4.6 and Stuart Pearce
-
 import os
-import textwrap
 
 import numpy as np
 import pandas as pd
-import pytest
 import xarray as xr
 
 from glide.riot_csv_writer import write_riot_csv
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_riot_dataset(n: int = 5, include_positions: bool = False) -> xr.Dataset:
@@ -62,11 +48,6 @@ def _make_riot_dataset(n: int = 5, include_positions: bool = False) -> xr.Datase
     return ds
 
 
-# ---------------------------------------------------------------------------
-# Unit tests – write_riot_csv
-# ---------------------------------------------------------------------------
-
-
 class TestWriteRiotCsv:
     """Tests for write_riot_csv."""
 
@@ -84,16 +65,16 @@ class TestWriteRiotCsv:
         write_riot_csv(_make_riot_dataset(), add_positions=False, output_path=out)
 
         df = pd.read_csv(out)
-        expected = [
+        expected = [  # This is the RIOT order specified in the docs
             "riotDataPrefix",
             "epochMsecs",
             "rtMsecs",
             "freq",
             "detectionLevel",
             "sequenceNumber",
-            "platformId",
-            "slot",
             "group",
+            "slot",
+            "platformId",
             "platformState",
             "recNumInFile",
         ]

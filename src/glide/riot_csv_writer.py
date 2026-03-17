@@ -1,5 +1,8 @@
+# Functions to parse the RIOT acoustics data and write to CSV
+
 import logging
 import os
+from collections import OrderedDict
 
 import numpy as np
 import xarray as xr
@@ -34,7 +37,7 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
     The resulting CSV, containing one record per ping with these
     columns, is written to ``output_path``.
     """
-    _log.debug(f"Gathering RIOT variables for CSV {output_path}")
+
     riot_vars = [
         "sr_ping_epoch_days",
         "sr_ping_secs",
@@ -48,6 +51,18 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
         "sr_ping_group",
         "sr_platform_state",
     ]
+    csv_columns_map = OrderedDict(
+        {
+            "sr_ping_rt_msecs": "rtMsecs",
+            "sr_ping_freq": "freq",
+            "sr_ping_detection_level": "detectionLevel",
+            "sr_ping_sequence_number": "sequenceNumber",
+            "sr_ping_group": "group",
+            "sr_ping_slot": "slot",
+            "sr_ping_platform_id": "platformId",
+            "sr_platform_state": "platformState",
+        }
+    )
 
     # Check that all required RIOT variables are present in the dataset
     if not set(riot_vars).issubset(set(ds.data_vars)):
@@ -55,6 +70,7 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
         return
 
     # Drop any variables that are not needed for RIOT output
+    _log.debug(f"Gathering RIOT variables for CSV {output_path}")
     vars_to_drop = set(ds.variables).difference(riot_vars)
     riot_ds = ds.drop_vars(vars_to_drop)
     if riot_ds.sizes.get("time", 0) == 0:
@@ -90,18 +106,8 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
         ["sr_ping_epoch_days", "sr_ping_secs", "sr_ping_msecs"], axis=1
     )
 
-    # rename columns to match headers in RIOT Data User Manual
-    csv_columns_map = {
-        "sr_ping_rt_msecs": "rtMsecs",
-        "sr_ping_freq": "freq",
-        "sr_ping_detection_level": "detectionLevel",
-        "sr_ping_sequence_number": "sequenceNumber",
-        "sr_ping_platform_id": "platformId",
-        "sr_ping_slot": "slot",
-        "sr_ping_group": "group",
-        "sr_platform_state": "platformState",
-    }
-    riot_df = riot_df.rename(columns=csv_columns_map)
+    # rename columns and reorder to match RIOT User data manual format
+    riot_df = riot_df.rename(columns=csv_columns_map)[csv_columns_map.values()]
 
     # Add the additional columns
     riot_df.insert(loc=0, column="epochMsecs", value=epoch_msecs)
@@ -112,7 +118,7 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
         riot_df = _add_positions(ds, riot_df, rows_to_keep)
 
     # Write to CSV
-    _log.debug("Writing to RIOT CSV")
+    _log.debug(f"Writing to RIOT CSV: {output_path}")
     # If the file exists already, it will append, so don't write
     # the header.
     if os.path.exists(output_path):
