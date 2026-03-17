@@ -24,3 +24,6 @@ tests/data/slocum.gps.csv
 
 # Notebooks
 *.ipynb
+
+# Pycharm projects
+*.idea
