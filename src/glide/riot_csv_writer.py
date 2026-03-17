@@ -66,15 +66,16 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
 
     # Check that all required RIOT variables are present in the dataset
     if not set(riot_vars).issubset(set(ds.data_vars)):
-        _log.error("Dataset is missing required RIOT variables")
+        missing_vars = set(riot_vars).difference(ds.data_vars)
+        _log.error(f"Dataset is missing required RIOT variables: {missing_vars}")
         return
 
     # Drop any variables that are not needed for RIOT output
-    _log.debug(f"Gathering RIOT variables for CSV {output_path}")
+    _log.debug(f"Gathering RIOT variables {output_path}")
     vars_to_drop = set(ds.variables).difference(riot_vars)
     riot_ds = ds.drop_vars(vars_to_drop)
     if riot_ds.sizes.get("time", 0) == 0:
-        _log.error("No RIOT data available to create the CSV")
+        _log.error("Time dimension of RIOT dataset is empty, no data to write to CSV")
         return
 
     # ToDo: this drop zeros section should be moved to processing L2
@@ -86,7 +87,7 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
     )
     riot_ds = riot_ds.where(rows_to_keep, drop=True)
     if riot_ds.sizes["time"] == 0:
-        _log.error("No RIOT data available to create the CSV")
+        _log.error("All RIOT records are zeros or NaNs, no data to write to CSV")
         return
 
     # typecasting according to RIOT User data manual
