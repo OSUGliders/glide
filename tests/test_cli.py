@@ -27,6 +27,44 @@ def test_l2() -> None:
     assert result.exit_code == 0
 
 
+def test_l2_directory_output() -> None:
+    import re
+    import tempfile
+    from datetime import datetime, timezone
+
+    data_dir = Path(str(resources.files("tests").joinpath("data")))
+    sbd_files = sorted(data_dir.glob("*.sbd.csv"))
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for sbd_file in sbd_files:
+            tbd_file = sbd_file.with_suffix("").with_suffix(".tbd.csv")
+            if not tbd_file.exists():
+                continue
+
+            glider = sbd_file.name.split("-")[0].split(".")[0]
+            result = runner.invoke(
+                app, ["l2", str(sbd_file), str(tbd_file), "-o", tmpdir, "-g", glider]
+            )
+            assert result.exit_code == 0, f"Failed for {sbd_file.name}: {result.output}"
+
+        nc_files = list(Path(tmpdir).glob("*.nc"))
+        assert len(nc_files) == len(sbd_files)
+
+        for nc_file in nc_files:
+            assert re.match(r"\w+_\d{8}T\d{6}Z\.nc", nc_file.name)
+
+            ds = xr.open_dataset(nc_file)
+            first_time = ds["time"].values[0]
+            ds.close()
+
+            dt = np.datetime64(first_time, "s").astype("datetime64[s]").astype(datetime)
+            dt = dt.replace(tzinfo=timezone.utc)
+            expected_ts = dt.strftime("%Y%m%dT%H%M%SZ")
+            assert expected_ts in nc_file.name, (
+                f"Timestamp mismatch: expected {expected_ts} in {nc_file.name}"
+            )
+
+
 def test_l3() -> None:
     l2_file = str(resources.files("tests").joinpath("data/slocum.l2.nc"))
     out_file = str(resources.files("tests").joinpath("data/slocum.l3.nc"))
