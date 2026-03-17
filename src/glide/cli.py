@@ -3,6 +3,7 @@
 import functools
 import inspect
 import logging
+from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
 
@@ -39,6 +40,13 @@ def log_args(func):
         return func(*args, **kwargs)
 
     return wrapper
+
+
+def generate_ioos_filename(ds, glider_name: str) -> str:
+    first_time = float(ds["time"].values[0])
+    dt = datetime.fromtimestamp(first_time, tz=timezone.utc)
+    timestamp = dt.strftime("%Y%m%dT%H%M%SZ")
+    return f"{glider_name}_{timestamp}.nc"
 
 
 # Commonly used argument annotations
@@ -129,6 +137,14 @@ def l2(
             "output.",
         ),
     ] = False,
+    glider_name: Annotated[
+        str | None,
+        typer.Option(
+            "--glider",
+            "-g",
+            help="Glider name for IOOS-style filename when output is a directory.",
+        ),
+    ] = None,
 ) -> None:
     """
     Generate L2 data from L1 data.
@@ -159,7 +175,12 @@ def l2(
 
     out.encoding["unlimited_dims"] = {}
 
-    out.to_netcdf(out_file)
+    out_path = Path(out_file)
+    if out_path.is_dir():
+        name = glider_name or conf["globals"]["trajectory"]["name"].split("_")[-1]
+        out_path = out_path / generate_ioos_filename(out, name)
+
+    out.to_netcdf(out_path)
 
     if riot_csv:
         from .riot_csv_writer import write_riot_csv
