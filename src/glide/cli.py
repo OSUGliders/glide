@@ -171,7 +171,9 @@ def l2(
 
     out = process_l1.enforce_types(out, conf)
 
-    out.attrs = conf["globals"]["netcdf_attributes"]
+    out.attrs = {
+        k: v for k, v in conf["globals"]["netcdf_attributes"].items() if v is not None
+    }
 
     out.encoding["unlimited_dims"] = {}
 
