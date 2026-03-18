@@ -37,6 +37,13 @@ def _format_variables(
     Converts variable units."""
 
     _log.debug("Formatting variables")
+
+    if not config.get("slocum"):
+        raise ValueError(
+            "Configuration has no slocum variable mapping. "
+            "Check that core.yml is properly loaded."
+        )
+
     reduced_name_map = {
         var: name for var, name in config["slocum"].items() if var in ds.variables
     }
@@ -63,6 +70,15 @@ def _format_variables(
     # Drop variables that are not in the specs file.
     remaining_vars = set(ds.keys()) - set(config["variables"].keys())
     ds = ds.drop_vars(remaining_vars)
+
+    if len(ds.data_vars) == 0:
+        _log.error(
+            "No data variables remain after formatting. Dropped variables: %s. "
+            "Expected slocum variables: %s",
+            list(remaining_vars),
+            list(config["slocum"].keys()),
+        )
+        raise ValueError("No recognized Slocum variables found in input file. ")
 
     _log.debug("Variables remaining in dataset %s", list(ds.keys()))
 
