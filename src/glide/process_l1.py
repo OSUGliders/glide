@@ -78,9 +78,7 @@ def _format_variables(
             list(remaining_vars),
             list(config["slocum"].keys()),
         )
-        raise ValueError(
-            "No recognized Slocum variables found in input file. "
-        )
+        raise ValueError("No recognized Slocum variables found in input file. ")
 
     _log.debug("Variables remaining in dataset %s", list(ds.keys()))
 
