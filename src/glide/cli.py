@@ -210,13 +210,13 @@ def l3(
     """
     Generate L3 data from L2 data.
     """
+    conf = config.load_config(config_file)
+
     l2 = process_l2.parse_l2(l2_file)
 
-    out = process_l2.bin_l2(l2, bin_size, depth)
+    out = process_l2.bin_l2(l2, bin_size, depth, conf)
 
     if q_netcdf is not None:
-        conf = config.load_config(config_file)
-
         q = ancillery.parse_q(q_netcdf)
 
         out = process_l3.bin_q(out, q, bin_size, conf)

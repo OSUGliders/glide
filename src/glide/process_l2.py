@@ -59,7 +59,10 @@ def parse_l2(file: str) -> xr.Dataset:
 
 
 def bin_l2(
-    ds: xr.Dataset, bin_size: float = 10.0, depth: float | None = None
+    ds: xr.Dataset,
+    bin_size: float = 10.0,
+    depth: float | None = None,
+    config: dict | None = None,
 ) -> xr.Dataset:
     """Depth bin size specified in meters."""
 
@@ -80,6 +83,16 @@ def bin_l2(
     # treat them after binning. We may want to define new QC variables in the future.
     qc_variables = [v for v in ds.variables if "_qc" in str(v)]
     drop_variables = qc_variables + ["dive_id", "climb_id", "state", "z"]
+
+    # Drop variables flagged with drop_from_l3 in the config
+    if config is not None:
+        for v in list(ds.variables):
+            try:
+                if config["variables"][v].get("drop_from_l3", False):
+                    _log.info("Not binning %s due to drop_from_l3 flag in config", v)
+                    drop_variables.append(v)
+            except KeyError:
+                pass
     _log.warning("Binning QC flags is not supported, dropping %s", drop_variables)
     for var in ds.variables:
         if "ancillary_variables" not in ds[var].attrs:
