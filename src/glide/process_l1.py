@@ -255,6 +255,9 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     CT = gsw.CT_from_t(ds.SA, ds.temperature, ds.pressure)
     ds["CT"] = (dims, CT.values, variable_specs["CT"]["CF"])
 
+    sound_speed = gsw.sound_speed(ds.SA, ds.CT, ds.pressure)
+    ds["sound_speed"] = (dims, sound_speed.values, variable_specs["sound_speed"]["CF"])
+
     new_variables = ["salinity", "SA", "density", "rho0", "CT"]
     ds = qc.init_qc(ds, new_variables, ds.conductivity_qc.values, config)
     ds = qc.apply_bounds(ds, new_variables)
