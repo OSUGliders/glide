@@ -383,6 +383,20 @@ CT:
     valid_max: 50.0
     observation_type: calculated
 
+
+sound_speed:
+  track_qc: True
+  dtype: f4
+  CF:
+    long_name: Sound speed
+    standard_name: speed_of_sound_in_sea_water
+    units: m s-1
+    instrument: instrument_ctd
+    valid_min: 1400.0
+    valid_max: 1600.0
+    observation_type: calculated
+
+
 N2:
   track_qc: True
   dtype: f4
