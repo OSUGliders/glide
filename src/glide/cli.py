@@ -266,9 +266,9 @@ def merge(
     dataset_dims = set(ds.dimensions)
     ds.close()
 
-    if dataset_dims == {"time"}:
+    if (dataset_dims == {"time"}) | (dataset_dims == {"time", "time_uv"}):
         input_file_level = 2
-    elif dataset_dims == {"profile_id", "z"}:
+    elif (dataset_dims == {"profile_id", "z"}) | (dataset_dims == {"profile_id", "z", "time_uv"}):
         input_file_level = 3
     else:
         raise ValueError(

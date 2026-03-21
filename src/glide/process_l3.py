@@ -42,7 +42,7 @@ def bin_q(
         ds[v] = (
             dims,
             np.full_like(ds.conductivity.values, np.nan),
-            config["variables"][v]["CF"],
+            config["merged_variables"][v]["CF"],
         )
         # Dissipation rate is stored in the q file as the log10 of the value.
         # Convert it to the actual value.
@@ -61,7 +61,10 @@ def bin_q(
                 ds_.profile_time_end.astype("M8[s]"),
             )
         )
-        if eds_.e_1.size < 1:
+        # Filter to valid depths within the bin range (also drops NaN).
+        in_range = (eds_.depth >= depth_bins[0]) & (eds_.depth <= depth_bins[-1])
+        eds_ = eds_.sel(time=in_range)
+        if eds_.time.size < 1:
             _log.debug("No epsilon data")
             continue
         binned = eds_.groupby_bins("depth", depth_bins).mean()
