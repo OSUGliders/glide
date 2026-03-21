@@ -268,7 +268,9 @@ def merge(
 
     if (dataset_dims == {"time"}) | (dataset_dims == {"time", "time_uv"}):
         input_file_level = 2
-    elif (dataset_dims == {"profile_id", "z"}) | (dataset_dims == {"profile_id", "z", "time_uv"}):
+    elif (dataset_dims == {"profile_id", "z"}) | (
+        dataset_dims == {"profile_id", "z", "time_uv"}
+    ):
         input_file_level = 3
     else:
         raise ValueError(
