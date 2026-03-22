@@ -457,7 +457,7 @@ def add_velocity(
     # Profiles between consecutive velocity reports form one group.
     groups = []  # list of (profile_mask, u_val, v_val)
 
-    if vel_times is not None and len(vel_times) > 0:
+    if vel_times is not None and vel_u is not None and vel_v is not None and len(vel_times) > 0:
         for i, t_vel in enumerate(vel_times):
             t_start = vel_times[i - 1] if i > 0 else -np.inf
             mask = (time_l2 > t_start) & (time_l2 <= t_vel) & is_profile
@@ -669,7 +669,7 @@ def backfill_velocity(
             u_vel, v_vel = _find_velocity_in_window(
                 vel_times, vel_u, vel_v, t_uv, t_end
             )
-            if u_vel is None:
+            if u_vel is None or v_vel is None:
                 continue
 
             u_old, v_old = u_vals[i], v_vals[i]
