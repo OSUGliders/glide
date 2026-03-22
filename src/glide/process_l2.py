@@ -83,7 +83,13 @@ def _interp_velocity_to_profiles(
     n_profiles = ds_binned.profile_id.size
     profile_t = np.asarray(profile_time, dtype="f8")
 
-    if not has_velocity or vel_time is None or vel_u is None or vel_v is None or len(vel_time) < 1:
+    if (
+        not has_velocity
+        or vel_time is None
+        or vel_u is None
+        or vel_v is None
+        or len(vel_time) < 1
+    ):
         _log.info("No valid velocity data for L3 interpolation")
         ds_binned["u"] = (("profile_id",), np.full(n_profiles, np.nan), u_attrs)
         ds_binned["v"] = (("profile_id",), np.full(n_profiles, np.nan), v_attrs)
