@@ -123,54 +123,60 @@ def test_assign_surface_state_no_flight_data() -> None:
     assert np.array_equal(result.state.values, state)
 
 
-def test_find_dive_cycles() -> None:
-    """Test that dive cycles are correctly identified from state transitions."""
-    # State sequence: surface -> dive -> climb -> surface -> dive -> climb -> surface
-    state = np.array(
-        [0, 0, 0, 1, 1, 1, 2, 2, 2, 0, 0, 1, 1, 2, 2, 0, 0, 0],
-        dtype="b",
+def test_add_velocity_groups_by_velocity_reports() -> None:
+    """Test that add_velocity groups profiles by velocity report times."""
+    from glide.config import load_config
+
+    config = load_config()
+
+    # Create L2-like dataset with 2 dive/climb cycles
+    # Times are in seconds, spaced to represent realistic dive durations
+    n = 100
+    time = np.arange(n, dtype=float) * 100  # 100s spacing
+    pressure = np.zeros(n)
+    # Cycle 1: dive 10-30, climb 30-50
+    pressure[10:30] = np.linspace(0, 100, 20)
+    pressure[30:50] = np.linspace(100, 0, 20)
+    # Cycle 2: dive 60-80, climb 80-95
+    pressure[60:80] = np.linspace(0, 100, 20)
+    pressure[80:95] = np.linspace(100, 0, 15)
+
+    dive_id = np.full(n, -1, dtype="i4")
+    climb_id = np.full(n, -1, dtype="i4")
+    dive_id[10:30] = 1
+    climb_id[30:50] = 1
+    dive_id[60:80] = 2
+    climb_id[80:95] = 2
+
+    ds = xr.Dataset(
+        {
+            "pressure": ("time", pressure),
+            "dive_id": ("time", dive_id),
+            "climb_id": ("time", climb_id),
+            "lat": ("time", np.full(n, 45.0)),
+            "lon": ("time", np.full(n, -125.0)),
+        },
+        coords={"time": time},
     )
 
-    cycles = pl1._find_dive_cycles(state)
-
-    # Should find 2 dive cycles
-    assert len(cycles) == 2, f"Expected 2 cycles, got {len(cycles)}"
-
-    # First cycle: indices 3-9 (dive+climb), surface 9-11
-    cycle_start, cycle_end, surf_start, surf_end = cycles[0]
-    assert cycle_start == 3
-    assert cycle_end == 9
-    assert surf_start == 9
-    assert surf_end == 11
-
-    # Second cycle: indices 11-15, surface 15-18
-    cycle_start, cycle_end, surf_start, surf_end = cycles[1]
-    assert cycle_start == 11
-    assert cycle_end == 15
-    assert surf_start == 15
-    assert surf_end == 18
-
-
-def test_find_dive_cycles_with_unknown_gaps() -> None:
-    """Test that unknown states at inflection points don't break cycles."""
-    # State with unknown gap between dive and climb (at inflection)
-    # surface -> dive -> unknown (inflection) -> climb -> surface
-    state = np.array(
-        [0, 0, 1, 1, 1, -1, -1, 2, 2, 2, 0, 0],
-        dtype="b",
+    # Flight data with velocity reports at surfacing times
+    # Times must be > 600s apart to be recognized as separate surfacings
+    flt_time = np.array([500.0, 5500.0, 9800.0])
+    flt = xr.Dataset(
+        {
+            "m_present_time": ("i", flt_time),
+            "m_water_vx": ("i", [0.1, 0.2, 0.3]),
+            "m_water_vy": ("i", [-0.05, -0.1, -0.15]),
+        },
     )
 
-    cycles = pl1._find_dive_cycles(state)
+    result = pl1.add_velocity(ds, config, flt=flt)
 
-    # Should find 1 cycle (not 2!)
-    assert len(cycles) == 1, f"Expected 1 cycle, got {len(cycles)}"
-
-    cycle_start, cycle_end, surf_start, surf_end = cycles[0]
-    # Cycle should span the entire dive+unknown+climb section
-    assert cycle_start == 2
-    assert cycle_end == 10
-    assert surf_start == 10
-    assert surf_end == 12
+    # Velocity at t=55 should capture cycle 1 (profiles 10-50)
+    # Velocity at t=98 should capture cycle 2 (profiles 60-95)
+    assert "u" in result
+    assert result.sizes["time_uv"] >= 2
+    assert np.isfinite(result.u.values).sum() >= 2
 
 
 def test_realtime_velocity_processing() -> None:

@@ -51,6 +51,89 @@ def _get_profile_indexes(ds: xr.Dataset) -> NDArray:
     return idxs[np.argsort(idxs[:, 0]), :]
 
 
+def _interp_velocity_to_profiles(
+    ds_binned: xr.Dataset,
+    profile_time: list,
+    has_velocity: bool,
+    vel_time: NDArray | None,
+    vel_u: NDArray | None,
+    vel_v: NDArray | None,
+    u_attrs: dict,
+    v_attrs: dict,
+) -> xr.Dataset:
+    """Interpolate depth-averaged velocity onto profile mid-point times.
+
+    NaN velocity values propagate naturally: any profile whose bracketing
+    velocity entries include a NaN will receive NaN. Profiles outside the
+    time range of velocity reports also receive NaN (no extrapolation).
+
+    Parameters
+    ----------
+    ds_binned : xr.Dataset
+        Binned L3 dataset with profile_id dimension.
+    profile_time : list
+        Profile mid-point times in posix seconds.
+    has_velocity : bool
+        Whether velocity data exists in the L2 source.
+    vel_time, vel_u, vel_v : array or None
+        Velocity data; may contain NaN values which propagate to output.
+    u_attrs, v_attrs : dict
+        CF attributes for u and v variables.
+    """
+    n_profiles = ds_binned.profile_id.size
+    profile_t = np.asarray(profile_time, dtype="f8")
+
+    if (
+        not has_velocity
+        or vel_time is None
+        or vel_u is None
+        or vel_v is None
+        or len(vel_time) < 1
+    ):
+        _log.info("No valid velocity data for L3 interpolation")
+        ds_binned["u"] = (("profile_id",), np.full(n_profiles, np.nan), u_attrs)
+        ds_binned["v"] = (("profile_id",), np.full(n_profiles, np.nan), v_attrs)
+        return ds_binned
+
+    # Interpolate using only the valid (finite) velocity points.
+    valid = np.isfinite(vel_u) & np.isfinite(vel_v)
+    if not valid.any():
+        _log.info("All velocity values are NaN")
+        ds_binned["u"] = (("profile_id",), np.full(n_profiles, np.nan), u_attrs)
+        ds_binned["v"] = (("profile_id",), np.full(n_profiles, np.nan), v_attrs)
+        return ds_binned
+
+    u_interp = np.interp(
+        profile_t, vel_time[valid], vel_u[valid], left=np.nan, right=np.nan
+    )
+    v_interp = np.interp(
+        profile_t, vel_time[valid], vel_v[valid], left=np.nan, right=np.nan
+    )
+
+    # Propagate NaN: mask profiles whose bracketing velocity entries have NaN.
+    # For each profile time, find the surrounding entries in the full
+    # (including NaN) velocity array.  If either neighbour is NaN, the
+    # interpolated value is set to NaN.
+    for i, t in enumerate(profile_t):
+        idx = np.searchsorted(vel_time, t)
+        left_nan = idx > 0 and not np.isfinite(vel_u[idx - 1])
+        right_nan = idx < len(vel_time) and not np.isfinite(vel_u[idx])
+        if left_nan or right_nan:
+            u_interp[i] = np.nan
+            v_interp[i] = np.nan
+
+    n_valid = np.isfinite(u_interp).sum()
+    _log.info(
+        "Interpolated velocity onto %d profiles (%d valid)",
+        n_profiles,
+        n_valid,
+    )
+
+    ds_binned["u"] = (("profile_id",), u_interp, u_attrs)
+    ds_binned["v"] = (("profile_id",), v_interp, v_attrs)
+    return ds_binned
+
+
 # Public functions
 
 
@@ -82,7 +165,29 @@ def bin_l2(
     # Dropping QC variables for now because it isn't clear how we should
     # treat them after binning. We may want to define new QC variables in the future.
     qc_variables = [v for v in ds.variables if "_qc" in str(v)]
-    drop_variables = qc_variables + ["dive_id", "climb_id", "state", "z"]
+    velocity_variables = [
+        v
+        for v in ["u", "v", "lat_uv", "lon_uv", "time_uv"]
+        if v in ds.variables or v in ds.dims
+    ]
+    drop_variables = (
+        qc_variables + ["dive_id", "climb_id", "state", "z"] + velocity_variables
+    )
+
+    # Extract velocity data before dropping, for later interpolation onto profiles.
+    # NaN velocity values are preserved so they propagate through interpolation.
+    has_velocity = "time_uv" in ds.dims and "u" in ds
+    if has_velocity:
+        vel_time = ds.time_uv.values.astype("f8") / 1e9  # posix seconds
+        vel_u = ds.u.values.astype("f8")
+        vel_v = ds.v.values.astype("f8")
+        # Only drop entries with invalid times; keep NaN u/v so they propagate.
+        valid_time = np.isfinite(vel_time)
+        vel_time = vel_time[valid_time]
+        vel_u = vel_u[valid_time]
+        vel_v = vel_v[valid_time]
+        u_attrs = ds.u.attrs.copy()
+        v_attrs = ds.v.attrs.copy()
 
     # Drop variables flagged with drop_from_l3 in the config
     if config is not None:
@@ -170,5 +275,17 @@ def bin_l2(
     ds_binned["profile_id"] = (("profile",), np.arange(1, len(ds_binned.profile) + 1))
     ds_binned = ds_binned.swap_dims({"profile": "profile_id"}).set_coords("profile_id")
     ds_binned = ds_binned.set_coords(["profile_time", "profile_lat", "profile_lon"])
+
+    # Interpolate velocity onto profile mid-point times.
+    ds_binned = _interp_velocity_to_profiles(
+        ds_binned,
+        profile_time,
+        has_velocity,
+        vel_time if has_velocity else None,
+        vel_u if has_velocity else None,
+        vel_v if has_velocity else None,
+        u_attrs if has_velocity else {},
+        v_attrs if has_velocity else {},
+    )
 
     return ds_binned.transpose()

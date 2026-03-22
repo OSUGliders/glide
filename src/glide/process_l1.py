@@ -406,84 +406,6 @@ def assign_surface_state(
     return ds
 
 
-def _find_dive_cycles(state: np.ndarray) -> list[tuple[int, int, int, int]]:
-    """Find dive cycles from state array.
-
-    A dive cycle is a contiguous sequence of dive (1), climb (2), and unknown (-1)
-    states bounded by surface (0) states. Unknown states are included because
-    there may be gaps at inflection points between dive and climb.
-
-    Parameters
-    ----------
-    state : np.ndarray
-        State array with values -1 (unknown), 0 (surface), 1 (dive), 2 (climb).
-
-    Returns
-    -------
-    list of tuples
-        Each tuple is (cycle_start, cycle_end, surf_start, surf_end) where:
-        - cycle_start/end: indices of the dive/climb portion
-        - surf_start/end: indices of the following surface period (for velocity lookup)
-    """
-    cycles = []
-    n = len(state)
-    i = 0
-
-    while i < n:
-        # Skip initial unknown states at the very start
-        while i < n and state[i] == -1:
-            i += 1
-
-        if i >= n:
-            break
-
-        # Skip surface period (before dive)
-        while i < n and state[i] == 0:
-            i += 1
-
-        if i >= n:
-            break
-
-        # Now we should be in dive/climb or unknown (gap)
-        # Look for any dive or climb state to start a cycle
-        if state[i] not in (-1, 1, 2):
-            i += 1
-            continue
-
-        # Find the actual start of dive/climb activity
-        cycle_start = i
-
-        # Continue through dive (1), climb (2), and unknown (-1) until we hit surface (0)
-        # This captures the full dive cycle including any gaps at inflection points
-        while i < n and state[i] != 0:
-            i += 1
-
-        cycle_end = i
-
-        # Check if this segment actually contains any dive or climb
-        segment_states = state[cycle_start:cycle_end]
-        has_dive_climb = np.any((segment_states == 1) | (segment_states == 2))
-
-        if not has_dive_climb:
-            # Pure unknown segment, skip it
-            continue
-
-        # Find following surface period
-        surf_start = i
-        while i < n and state[i] == 0:
-            i += 1
-        surf_end = i
-
-        # Only record if we found a surface period after (for velocity)
-        if surf_end > surf_start:
-            cycles.append((cycle_start, cycle_end, surf_start, surf_end))
-        else:
-            # No surface after - this is incomplete, skip velocity
-            cycles.append((cycle_start, cycle_end, -1, -1))
-
-    return cycles
-
-
 def add_velocity(
     ds: xr.Dataset,
     config: dict,
@@ -491,14 +413,16 @@ def add_velocity(
 ) -> xr.Dataset:
     """Add depth-averaged velocity variables to L2 dataset.
 
-    Uses state transitions to identify dive cycles. A dive cycle is all
-    contiguous dive (1) and climb (2) states between surface (0) periods.
-    Velocity is taken from the following surface period.
+    Groups profiles by velocity reports from the raw flight data. Each velocity
+    report (m_water_vx/vy) marks a surfacing. All profiles between consecutive
+    velocity reports belong to one group and share that velocity estimate.
+    An additional group is created for any trailing profiles with no velocity
+    report yet (for later backfill).
 
     Parameters
     ----------
     ds : xr.Dataset
-        L2 dataset with state variable (must have surface states assigned).
+        L2 dataset with dive_id and climb_id from get_profiles.
     config : dict
         Configuration with variable specifications.
     flt : xr.Dataset, optional
@@ -514,56 +438,64 @@ def add_velocity(
         ds["v"] = (("time_uv",), [np.nan], specs["v"]["CF"])
         return ds
 
-    if "state" not in ds:
-        _log.warning("No state variable in dataset - run get_profiles first")
+    if "dive_id" not in ds or "climb_id" not in ds:
+        _log.warning("No dive/climb IDs in dataset - run get_profiles first")
         return _empty_velocity()
-
-    # Find dive cycles from state transitions
-    cycles = _find_dive_cycles(ds.state.values)
-    n_cycles = len(cycles)
-
-    if n_cycles < 1:
-        _log.warning("No dive cycles detected from state transitions")
-        return _empty_velocity()
-
-    _log.debug("Found %d dive cycles from state transitions", n_cycles)
-
-    # Extract velocity data from flight data
-    vel_times, vel_u, vel_v = _extract_velocity_data(flt)
 
     time_l2 = ds.time.values
     lat_l2 = ds.lat.values
     lon_l2 = ds.lon.values
+    is_profile = (ds.dive_id.values >= 0) | (ds.climb_id.values >= 0)
 
-    time_uv = np.full(n_cycles, np.nan)
-    lat_uv = np.full(n_cycles, np.nan)
-    lon_uv = np.full(n_cycles, np.nan)
-    u = np.full(n_cycles, np.nan)
-    v = np.full(n_cycles, np.nan)
+    if not is_profile.any():
+        _log.warning("No profiles found in dataset")
+        return _empty_velocity()
 
-    for i, (cycle_start, cycle_end, surf_start, surf_end) in enumerate(cycles):
-        # Mean time and position from the dive/climb portion
-        cycle_times = time_l2[cycle_start:cycle_end]
-        cycle_lats = lat_l2[cycle_start:cycle_end]
-        cycle_lons = lon_l2[cycle_start:cycle_end]
+    vel_times, vel_u, vel_v = _extract_velocity_data(flt)
 
-        if len(cycle_times) > 0:
-            time_uv[i] = np.nanmean(cycle_times)
-            lat_uv[i] = np.nanmean(cycle_lats)
-            lon_uv[i] = np.nanmean(cycle_lons)
+    # Build groups from velocity reports, each marking a surfacing.
+    # Profiles between consecutive velocity reports form one group.
+    groups = []  # list of (profile_mask, u_val, v_val)
 
-        # Find velocity in the following surface period
-        if surf_start < 0 or vel_times is None:
-            continue
+    if (
+        vel_times is not None
+        and vel_u is not None
+        and vel_v is not None
+        and len(vel_times) > 0
+    ):
+        for i, t_vel in enumerate(vel_times):
+            t_start = vel_times[i - 1] if i > 0 else -np.inf
+            mask = (time_l2 > t_start) & (time_l2 <= t_vel) & is_profile
+            if mask.any():
+                groups.append((mask, vel_u[i], vel_v[i]))
 
-        t_start = time_l2[surf_start]
-        t_end = time_l2[surf_end - 1] + 60 if surf_end > surf_start else t_start + 60
+        # Trailing profiles after the last velocity report (no velocity yet)
+        mask = (time_l2 > vel_times[-1]) & is_profile
+        if mask.any():
+            groups.append((mask, np.nan, np.nan))
+    else:
+        # No velocity data at all — one group with all profiles, NaN velocity
+        if is_profile.any():
+            groups.append((is_profile, np.nan, np.nan))
 
-        u_vel, v_vel = _find_velocity_in_window(vel_times, vel_u, vel_v, t_start, t_end)
-        if u_vel is not None:
-            u[i] = u_vel
-            v[i] = v_vel
-            _log.debug("Cycle %d: assigned u=%.4f, v=%.4f", i, u[i], v[i])
+    if not groups:
+        return _empty_velocity()
+
+    n_groups = len(groups)
+    time_uv = np.full(n_groups, np.nan)
+    lat_uv = np.full(n_groups, np.nan)
+    lon_uv = np.full(n_groups, np.nan)
+    u = np.full(n_groups, np.nan)
+    v = np.full(n_groups, np.nan)
+
+    for i, (mask, u_val, v_val) in enumerate(groups):
+        time_uv[i] = np.nanmean(time_l2[mask])
+        lat_uv[i] = np.nanmean(lat_l2[mask])
+        lon_uv[i] = np.nanmean(lon_l2[mask])
+        u[i] = u_val
+        v[i] = v_val
+        if np.isfinite(u_val):
+            _log.debug("Group %d: assigned u=%.4f, v=%.4f", i, u_val, v_val)
 
     ds["time_uv"] = (("time_uv",), time_uv, specs["time_uv"]["CF"])
     ds["lat_uv"] = (("time_uv",), lat_uv, specs["lat_uv"]["CF"])
@@ -572,8 +504,8 @@ def add_velocity(
     ds["v"] = (("time_uv",), v, specs["v"]["CF"])
 
     _log.info(
-        "Added velocity for %d dive cycles, %d with valid data",
-        n_cycles,
+        "Added velocity for %d groups, %d with valid data",
+        n_groups,
         np.isfinite(u).sum(),
     )
     return ds
@@ -606,7 +538,34 @@ def _extract_velocity_data(
         _log.warning("No valid velocity data in flight data")
         return None, None, None
 
-    return time_flt[vel_valid], u_flt[vel_valid], v_flt[vel_valid]
+    times = time_flt[vel_valid]
+    u_vals = u_flt[vel_valid]
+    v_vals = v_flt[vel_valid]
+
+    # Sort by time (combined L1 files may not be time-ordered)
+    order = np.argsort(times)
+    times = times[order]
+    u_vals = u_vals[order]
+    v_vals = v_vals[order]
+
+    # Cluster velocity reports by surfacing events. At each surfacing the
+    # flight computer may refine velocity as GPS improves, producing multiple
+    # reports within minutes. A gap longer than `gap_threshold` indicates the
+    # glider dove and surfaced again. We take the last report from each
+    # surfacing as the best estimate.
+    gap_threshold = 600  # seconds (10 minutes)
+    dt = np.diff(times)
+    new_surfacing = np.concatenate(([True], dt > gap_threshold))
+    starts = np.where(new_surfacing)[0]
+    ends = np.concatenate((starts[1:], [len(times)])) - 1
+
+    _log.debug(
+        "Clustered %d velocity reports into %d surfacing events",
+        len(times),
+        len(ends),
+    )
+
+    return times[ends], u_vals[ends], v_vals[ends]
 
 
 def _find_velocity_in_window(
@@ -649,10 +608,9 @@ def backfill_velocity(
 ) -> bool:
     """Backfill velocity data in an L2 file using raw flight data.
 
-    For each velocity estimate, searches raw flight data for velocity in a
-    time window starting at the end of the climb (last point with matching
-    climb_id after time_uv). Updates the value if it is missing (NaN) or if
-    the new estimate differs significantly from the existing one.
+    For each time_uv entry with missing velocity, searches raw flight data
+    for the first velocity report after that entry's time. Updates velocity
+    if missing or if the new estimate differs significantly.
 
     Parameters
     ----------
@@ -686,20 +644,13 @@ def backfill_velocity(
 
     _log.debug("Found %d velocity estimates in raw data", len(vel_times))
 
-    # Update the L2 file
     file_updated = False
     with nc.Dataset(l2_file, "r+") as ds:
         if "u" not in ds.variables or "v" not in ds.variables:
             _log.warning("No velocity variables in %s", l2_file)
             return False
 
-        if "climb_id" not in ds.variables:
-            _log.warning("No climb_id variable in %s", l2_file)
-            return False
-
-        time_l2 = ds.variables["time"][:]
         time_uv = np.ma.filled(ds.variables["time_uv"][:], np.nan)
-        climb_id = np.ma.filled(ds.variables["climb_id"][:], -1)
         u_vals = np.ma.filled(ds.variables["u"][:], np.nan)
         v_vals = np.ma.filled(ds.variables["v"][:], np.nan)
 
@@ -711,30 +662,18 @@ def backfill_velocity(
         for i in range(n_uv):
             t_uv = time_uv[i]
             if np.isnan(t_uv):
-                continue  # No valid time_uv for this cycle
-
-            # Find the last point with this climb_id after time_uv
-            climb_mask = (climb_id == i) & (time_l2 >= t_uv)
-            if not climb_mask.any():
-                _log.debug("No climb points after time_uv for cycle %d", i)
                 continue
 
-            # Search window starts at end of climb
-            t_start = time_l2[climb_mask][-1]
-
-            # Search window ends at next valid time_uv (or +10 min)
-            if i + 1 < n_uv and np.isfinite(time_uv[i + 1]):
-                t_end = time_uv[i + 1]
-            else:
-                t_end = t_start + 600  # 10 minutes max
+            # Search window: from time_uv to next time_uv (or +10 min)
+            t_end = (
+                time_uv[i + 1]
+                if i + 1 < n_uv and np.isfinite(time_uv[i + 1])
+                else t_uv + 600
+            )
 
             u_vel, v_vel = _find_velocity_in_window(
-                vel_times, vel_u, vel_v, t_start, t_end
+                vel_times, vel_u, vel_v, t_uv, t_end
             )
-            if u_vel is None:
-                continue
-
-            # Check if update is needed (missing or significantly different)
             if u_vel is None or v_vel is None:
                 continue
 
@@ -749,10 +688,10 @@ def backfill_velocity(
                 ds.variables["v"][i] = v_vel
                 file_updated = True
                 if is_missing:
-                    _log.info("Backfilled cycle %d: u=%.4f, v=%.4f", i, u_vel, v_vel)
+                    _log.info("Backfilled group %d: u=%.4f, v=%.4f", i, u_vel, v_vel)
                 else:
                     _log.info(
-                        "Updated cycle %d: u=%.4f->%.4f, v=%.4f->%.4f",
+                        "Updated group %d: u=%.4f->%.4f, v=%.4f->%.4f",
                         i,
                         u_old,
                         u_vel,
