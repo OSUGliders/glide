@@ -556,7 +556,8 @@ def _extract_velocity_data(
 
     _log.debug(
         "Clustered %d velocity reports into %d surfacing events",
-        len(times), len(ends),
+        len(times),
+        len(ends),
     )
 
     return times[ends], u_vals[ends], v_vals[ends]
@@ -659,7 +660,11 @@ def backfill_velocity(
                 continue
 
             # Search window: from time_uv to next time_uv (or +10 min)
-            t_end = time_uv[i + 1] if i + 1 < n_uv and np.isfinite(time_uv[i + 1]) else t_uv + 600
+            t_end = (
+                time_uv[i + 1]
+                if i + 1 < n_uv and np.isfinite(time_uv[i + 1])
+                else t_uv + 600
+            )
 
             u_vel, v_vel = _find_velocity_in_window(
                 vel_times, vel_u, vel_v, t_uv, t_end

@@ -43,3 +43,8 @@ dev = [
 
 [tool.mypy]
 disable_error_code = ["import-untyped"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:Mean of empty slice:RuntimeWarning",
+]
