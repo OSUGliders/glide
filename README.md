@@ -25,6 +25,20 @@ pipx install git+https://github.com/OSUGliders/glide
 
 ## Usage
 
+```mermaid
+flowchart TD;
+    sbd[L0 .sbd/.dbd] -->|dbd2netcdf| l1sbd[L1 .sbd.nc];
+    tbd[L0 .tbd/.ebd] -->|dbd2netcdf| l1tbd[L1 .tbd.nc];
+    l1sbd --- C[ ]:::empty;
+    l1tbd --- C;
+    C -->|glide l2| l2[L2 .l2.nc];
+    q[.q.nc] -->|glide merge| l3;
+    l2 -->|glide l3| l3[L3 .l3.nc];
+    
+classDef empty fill:none,stroke:none,color:transparent,width:1px,height:1px;
+```
+
+
 `glide` requires a configuration file to properly process glider data. If you do not provide a file, the [default file](src/glide/assets/config.yml) will be used. The configuration file specifies which variables to extract from the L1 data and provides flags for unit conversion and quality controls. Variables that are not listed will not be extracted.
 
 Assuming that you have already run `dbd2netcdf` over a directory of files (e.g. `dbd2netcdf -o glider.tbd.nc *.tbd`) you can apply the l2 processing using,
