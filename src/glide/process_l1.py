@@ -191,11 +191,10 @@ def merge(
 
     vars_to_interp = set(ds_to_interp.variables) - set(ds_to_interp.coords)
 
+    interpolated_vars = []
     for v in vars_to_interp:
         if "_qc" in str(v):
-            _log.warning(
-                "Ignoring %s, merging of QC variables in not currently supported", v
-            )
+            _log.debug("Skipping %s; QC flags are re-initialized after merge", v)
             continue
 
         try:  # Only drop variables if the flag is explicitly set
@@ -212,6 +211,20 @@ def merge(
             ds_to_interp[v].interp(time=time_interpolant, assume_sorted=True).values,
             ds_to_interp[v].attrs,
         )
+        interpolated_vars.append(str(v))
+
+    # Re-initialize QC for variables interpolated from ds_to_interp that have
+    # track_qc: True in the config.  Values are flagged as interpolated (8).
+    for v in interpolated_vars:
+        if v + "_qc" in ds:
+            continue  # Already has a QC variable from the base dataset
+        if v not in config["variables"]:
+            continue
+        if not config["variables"][v].get("track_qc", False):
+            continue
+        flag_values = np.where(np.isfinite(ds[v].values), np.int8(8), np.int8(9))
+        ds = qc.init_qc(ds, v, flag_values)
+        _log.debug("Initialized QC for merged variable %s", v)
 
     _log.debug("Dims interpolated data  %s", ds.sizes)
     _log.debug("Coords interpolated data  %s", list(ds.coords.keys()))
@@ -258,7 +271,7 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     sound_speed = gsw.sound_speed(ds.SA, ds.CT, ds.pressure)
     ds["sound_speed"] = (dims, sound_speed.values, variable_specs["sound_speed"]["CF"])
 
-    new_variables = ["salinity", "SA", "density", "rho0", "CT"]
+    new_variables = ["salinity", "SA", "density", "rho0", "CT", "sound_speed"]
     ds = qc.init_qc(ds, new_variables, ds.conductivity_qc.values, config)
     ds = qc.apply_bounds(ds, new_variables)
 
