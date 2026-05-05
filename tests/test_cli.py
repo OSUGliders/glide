@@ -6,6 +6,7 @@ import xarray as xr
 from typer.testing import CliRunner
 
 from glide.cli import app
+from glide.config import load_config
 
 runner = CliRunner()
 
@@ -25,6 +26,35 @@ def test_l2() -> None:
     result = runner.invoke(app, ["l2", flt_file, sci_file, "-o", out_file])
 
     assert result.exit_code == 0
+
+    # Contract: every variable with track_qc: True in the config that is present
+    # in the output must have a _qc counterpart and an ancillary_variables
+    # attribute pointing to it.
+    config = load_config()
+    track_qc_vars = {
+        v for v, specs in config["variables"].items() if specs.get("track_qc", False)
+    }
+
+    ds = xr.open_dataset(out_file)
+
+    missing_qc_var = []
+    missing_ancillary_attr = []
+    for var in sorted(track_qc_vars):
+        if var not in ds:
+            continue
+        qc_var = var + "_qc"
+        if qc_var not in ds:
+            missing_qc_var.append(var)
+            continue
+        if ds[var].attrs.get("ancillary_variables") != qc_var:
+            missing_ancillary_attr.append(var)
+
+    ds.close()
+
+    assert not missing_qc_var, f"Missing _qc variables in L2 output: {missing_qc_var}"
+    assert not missing_ancillary_attr, (
+        f"Missing or incorrect ancillary_variables attribute for: {missing_ancillary_attr}"
+    )
 
 
 def test_l2_directory_output() -> None:

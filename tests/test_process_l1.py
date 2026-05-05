@@ -5,6 +5,7 @@ import pandas as pd
 import xarray as xr
 
 import glide.process_l1 as pl1
+import glide.qc as qc
 from glide.config import load_config
 
 
@@ -44,6 +45,143 @@ def test_format_variables() -> None:
 def test_parse_l1() -> None:
     pl1.parse_l1(get_test_data("684", "sbd"))
     pl1.parse_l1(get_test_data("684", "tbd"))
+
+
+def test_merge_creates_qc_for_flight_variables() -> None:
+    """Variables from flight data with track_qc: True must have QC counterparts
+    in the merged dataset. lat and lon only exist in flight data; their _qc
+    variables are dropped during merge interpolation, so merge() must re-create
+    them from scratch."""
+    config = load_config()
+
+    n_flt = 20
+    flt_time = np.arange(n_flt, dtype="f8") * 10.0  # 0, 10, ..., 190 s
+    lat_vals = np.linspace(44.0, 45.0, n_flt)
+    lon_vals = np.linspace(-125.0, -124.0, n_flt)
+    lat_vals[3:5] = np.nan  # Simulate missing dead-reckoning positions
+
+    flt = xr.Dataset(
+        {
+            "lat": (
+                "time",
+                lat_vals,
+                {
+                    "long_name": "Latitude",
+                    "standard_name": "latitude",
+                    "valid_min": -90.0,
+                    "valid_max": 90.0,
+                },
+            ),
+            "lon": (
+                "time",
+                lon_vals,
+                {
+                    "long_name": "Longitude",
+                    "standard_name": "longitude",
+                    "valid_min": -180.0,
+                    "valid_max": 180.0,
+                },
+            ),
+        },
+        coords={"time": flt_time},
+    )
+    flt = qc.init_qc(flt, ["lat", "lon"], config=config)
+
+    n_sci = 15
+    sci_time = np.linspace(5.0, 185.0, n_sci)
+    pressure_vals = np.linspace(0.0, 100.0, n_sci)
+
+    sci = xr.Dataset(
+        {
+            "pressure": (
+                "time",
+                pressure_vals,
+                {
+                    "long_name": "Pressure",
+                    "standard_name": "sea_water_pressure",
+                    "valid_min": 0.0,
+                    "valid_max": 2000.0,
+                },
+            ),
+        },
+        coords={"time": sci_time},
+    )
+    sci = qc.init_qc(sci, ["pressure"], config=config)
+
+    merged = pl1.merge(flt, sci, config, "science")
+
+    # Interpolated flight variables must be present
+    assert "lat" in merged
+    assert "lon" in merged
+
+    # QC variables must exist for all track_qc: True variables in the merged output
+    assert "lat_qc" in merged, "lat_qc missing after merge"
+    assert "lon_qc" in merged, "lon_qc missing after merge"
+
+    # QC arrays must align with the science time dimension
+    assert merged.lat_qc.shape == (n_sci,)
+    assert merged.lon_qc.shape == (n_sci,)
+
+    # Non-NaN values must be flagged as interpolated (8); NaN as missing (9)
+    lat_merged = merged.lat.values
+    lat_qc_vals = merged.lat_qc.values
+    assert np.all(lat_qc_vals[np.isfinite(lat_merged)] == 8)
+    assert np.all(lat_qc_vals[~np.isfinite(lat_merged)] == 9)
+
+    # ancillary_variables attribute must point to the QC variable
+    assert merged.lat.attrs.get("ancillary_variables") == "lat_qc"
+    assert merged.lon.attrs.get("ancillary_variables") == "lon_qc"
+
+    # Science QC variables must be preserved through the merge
+    assert "pressure_qc" in merged, "pressure_qc missing after merge"
+
+
+def test_merge_does_not_overwrite_existing_qc() -> None:
+    """If a variable's QC counterpart already exists in the base (science) dataset,
+    merge() must not overwrite it."""
+    config = load_config()
+
+    n_flt = 10
+    flt_time = np.arange(n_flt, dtype="f8") * 20.0
+
+    flt = xr.Dataset(
+        {
+            "lat": (
+                "time",
+                np.linspace(44.0, 45.0, n_flt),
+                {"long_name": "Latitude", "standard_name": "latitude"},
+            ),
+        },
+        coords={"time": flt_time},
+    )
+    flt = qc.init_qc(flt, ["lat"], config=config)
+
+    n_sci = 8
+    sci_time = np.linspace(10.0, 170.0, n_sci)
+    sentinel_flags = np.full(n_sci, 3, dtype="b")  # Intentionally distinct flag value
+
+    sci = xr.Dataset(
+        {
+            "lat": (
+                "time",
+                np.linspace(44.1, 44.9, n_sci),
+                {"long_name": "Latitude", "standard_name": "latitude"},
+            ),
+            "lat_qc": (
+                "time",
+                sentinel_flags,
+                {"flag_meanings": "sentinel", "flag_values": np.array([3], dtype="b")},
+            ),
+        },
+        coords={"time": sci_time},
+    )
+
+    merged = pl1.merge(flt, sci, config, "science")
+
+    assert "lat_qc" in merged
+    assert np.all(merged.lat_qc.values == 3), (
+        "Pre-existing lat_qc must not be overwritten"
+    )
 
 
 def test_assign_surface_state() -> None:
@@ -325,7 +463,6 @@ def test_realtime_velocity_merged() -> None:
 
     # Check that we detected some profiles
     n_dives = (out.dive_id.values >= 0).sum()
-    n_climbs = (out.climb_id.values >= 0).sum()
 
     # Assign surface state and add velocity
     out = pl1.assign_surface_state(out, flt=flt_raw)
