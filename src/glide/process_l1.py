@@ -194,9 +194,7 @@ def merge(
     interpolated_vars = []
     for v in vars_to_interp:
         if "_qc" in str(v):
-            _log.warning(
-                "Ignoring %s, merging of QC variables in not currently supported", v
-            )
+            _log.debug("Skipping %s; QC flags are re-initialized after merge", v)
             continue
 
         try:  # Only drop variables if the flag is explicitly set
@@ -216,9 +214,7 @@ def merge(
         interpolated_vars.append(str(v))
 
     # Re-initialize QC for variables interpolated from ds_to_interp that have
-    # track_qc: True in the config. Their original QC variables are skipped above
-    # (QC interpolation is not supported), so we create fresh ones here. Values
-    # are flagged as interpolated (8) because they were resampled onto a new time grid.
+    # track_qc: True in the config.  Values are flagged as interpolated (8).
     for v in interpolated_vars:
         if v + "_qc" in ds:
             continue  # Already has a QC variable from the base dataset
