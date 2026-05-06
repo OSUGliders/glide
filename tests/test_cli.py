@@ -49,6 +49,15 @@ def test_l2() -> None:
         if ds[var].attrs.get("ancillary_variables") != qc_var:
             missing_ancillary_attr.append(var)
 
+    # Contract: surface GPS fixes must appear on a dedicated time_gps dimension
+    # with no NaN values (only valid fixes are written).
+    assert "time_gps" in ds.dims, "time_gps dimension missing from L2 output"
+    assert "lat_gps" in ds, "lat_gps missing from L2 output"
+    assert "lon_gps" in ds, "lon_gps missing from L2 output"
+    assert ds.sizes["time_gps"] > 0, "Expected at least one GPS fix in L2 output"
+    assert np.all(np.isfinite(ds.lat_gps.values)), "lat_gps must not contain NaN"
+    assert np.all(np.isfinite(ds.lon_gps.values)), "lon_gps must not contain NaN"
+
     ds.close()
 
     assert not missing_qc_var, f"Missing _qc variables in L2 output: {missing_qc_var}"

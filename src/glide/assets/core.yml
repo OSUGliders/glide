@@ -60,16 +60,18 @@ lon:
     valid_min: -180.0
     coordinate_reference_frame: urn:ogc:crs:EPSG::4326
 
-m_gps_lat:
+lat_gps:
   source: m_gps_lat
   conversion: dpm_to_dd
-  drop_from_l2: True
+  drop_from_l2: True  # Excluded from science-time interpolation; placed on time_gps by add_gps_fixes
+  drop_from_l3: True
+  dtype: f4
   CF:
     long_name: Latitude
     standard_name: latitude
     units: degrees_north
     axis: Y
-    comment: "Surface fixes"
+    comment: "Surface GPS fixes"
     observation_type: measured
     platform: platform
     reference: WGS84
@@ -77,22 +79,34 @@ m_gps_lat:
     valid_min: -90.0
     coordinate_reference_frame: urn:ogc:crs:EPSG::4326
 
-m_gps_lon:
+lon_gps:
   source: m_gps_lon
   conversion: dpm_to_dd
-  drop_from_l2: True
+  drop_from_l2: True  # Excluded from science-time interpolation; placed on time_gps by add_gps_fixes
+  drop_from_l3: True
+  dtype: f4
   CF:
     long_name: Longitude
     standard_name: longitude
     units: degrees_east
     axis: X
-    comment: "Surface fixes"
+    comment: "Surface GPS fixes"
     observation_type: measured
     platform: platform
     reference: WGS84
     valid_max: 180.0
     valid_min: -180.0
     coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+
+time_gps:
+  drop_from_l3: True
+  CF:
+    calendar: gregorian
+    long_name: GPS Fix Time
+    observation_type: measured
+    source_sensor: m_present_time
+    standard_name: time
+    units: seconds since 1970-01-01T00:00:00Z
 
 m_depth:
   source: m_depth
