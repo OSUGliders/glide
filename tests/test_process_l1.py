@@ -477,3 +477,71 @@ def test_realtime_velocity_merged() -> None:
     # (may still be NaN if velocity data not in these segments)
     if n_dives > 0:
         assert out.sizes["time_uv"] >= 1, "Expected at least one velocity entry"
+
+
+def test_add_gps_fixes_creates_gps_dimension() -> None:
+    """Only valid (non-NaN) GPS fixes should appear on the time_gps dimension,
+    preserving their original timestamps."""
+    config = load_config()
+
+    n = 10
+    time_vals = np.arange(n, dtype="f8") * 100.0  # 0, 100, ..., 900 s
+    lat_vals = np.full(n, np.nan)
+    lon_vals = np.full(n, np.nan)
+    # Three valid fixes embedded among NaNs
+    fix_indices = [2, 5, 8]
+    lat_vals[fix_indices] = [44.0, 44.5, 45.0]
+    lon_vals[fix_indices] = [-125.0, -124.5, -124.0]
+
+    flt = xr.Dataset(
+        {"lat_gps": ("time", lat_vals), "lon_gps": ("time", lon_vals)},
+        coords={"time": time_vals},
+    )
+    ds = xr.Dataset(coords={"time": time_vals})
+
+    result = pl1.add_gps_fixes(ds, flt, config)
+
+    assert "time_gps" in result.dims, "time_gps dimension missing"
+    assert "lat_gps" in result, "lat_gps missing"
+    assert "lon_gps" in result, "lon_gps missing"
+
+    assert result.sizes["time_gps"] == 3
+    assert np.all(np.isfinite(result.lat_gps.values)), "lat_gps must not contain NaN"
+    assert np.all(np.isfinite(result.lon_gps.values)), "lon_gps must not contain NaN"
+    assert np.allclose(result.lat_gps.values, [44.0, 44.5, 45.0])
+    assert np.allclose(result.time_gps.values, [200.0, 500.0, 800.0])
+
+
+def test_add_gps_fixes_no_gps_variables() -> None:
+    """Dataset must be returned unchanged when the flight data has no GPS variables."""
+    config = load_config()
+
+    flt = xr.Dataset(coords={"time": np.arange(5, dtype="f8")})
+    ds = xr.Dataset(coords={"time": np.arange(5, dtype="f8")})
+
+    result = pl1.add_gps_fixes(ds, flt, config)
+
+    assert "time_gps" not in result.dims
+    assert "lat_gps" not in result
+    assert "lon_gps" not in result
+
+
+def test_add_gps_fixes_all_nan() -> None:
+    """Dataset must be returned unchanged when all GPS fixes are NaN."""
+    config = load_config()
+
+    n = 5
+    flt = xr.Dataset(
+        {
+            "lat_gps": ("time", np.full(n, np.nan)),
+            "lon_gps": ("time", np.full(n, np.nan)),
+        },
+        coords={"time": np.arange(n, dtype="f8")},
+    )
+    ds = xr.Dataset(coords={"time": np.arange(n, dtype="f8")})
+
+    result = pl1.add_gps_fixes(ds, flt, config)
+
+    assert "time_gps" not in result.dims
+    assert "lat_gps" not in result
+    assert "lon_gps" not in result

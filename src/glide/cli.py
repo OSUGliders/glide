@@ -169,6 +169,8 @@ def l2(
 
     out = process_l1.add_velocity(out, conf, flt=flt_raw)
 
+    out = process_l1.add_gps_fixes(out, flt, conf)
+
     out = process_l1.enforce_types(out, conf)
 
     out.attrs = {
@@ -266,11 +268,15 @@ def merge(
     dataset_dims = set(ds.dimensions)
     ds.close()
 
-    if (dataset_dims == {"time"}) | (dataset_dims == {"time", "time_uv"}):
+    # L2 files have a time dimension and may have additional per-event dimensions
+    # (time_uv for velocity, time_gps for GPS fixes, traj_strlen for trajectory).
+    # L3 files are indexed by profile_id and z.
+    _L2_DIMS = {"time", "time_uv", "time_gps", "traj_strlen"}
+    _L3_DIMS = {"profile_id", "z"}
+
+    if "time" in dataset_dims and dataset_dims <= _L2_DIMS:
         input_file_level = 2
-    elif (dataset_dims == {"profile_id", "z"}) | (
-        dataset_dims == {"profile_id", "z", "time_uv"}
-    ):
+    elif _L3_DIMS <= dataset_dims:
         input_file_level = 3
     else:
         raise ValueError(

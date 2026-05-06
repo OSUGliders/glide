@@ -715,6 +715,40 @@ def backfill_velocity(
     return file_updated
 
 
+def add_gps_fixes(ds: xr.Dataset, flt: xr.Dataset, config: dict) -> xr.Dataset:
+    """Add surface GPS fixes on a separate time_gps dimension.
+
+    Valid (non-NaN) fixes from the post-QC flight dataset are placed on a
+    time_gps coordinate, independent of the science time vector. This preserves
+    the original fix timestamps rather than interpolating GPS positions onto
+    the science time grid.
+    """
+    if "lat_gps" not in flt or "lon_gps" not in flt:
+        _log.debug("No GPS variables in flight dataset, skipping GPS fixes")
+        return ds
+
+    specs = config["variables"]
+
+    lat_vals = flt.lat_gps.values
+    lon_vals = flt.lon_gps.values
+    time_vals = flt.time.values
+
+    valid = np.isfinite(lat_vals) & np.isfinite(lon_vals)
+    n_valid = int(valid.sum())
+
+    if n_valid == 0:
+        _log.debug("No valid GPS fixes found")
+        return ds
+
+    _log.debug("Adding %d surface GPS fixes on time_gps dimension", n_valid)
+
+    ds["time_gps"] = (("time_gps",), time_vals[valid], specs["time_gps"]["CF"])
+    ds["lat_gps"] = (("time_gps",), lat_vals[valid], specs["lat_gps"]["CF"])
+    ds["lon_gps"] = (("time_gps",), lon_vals[valid], specs["lon_gps"]["CF"])
+
+    return ds
+
+
 def enforce_types(ds: xr.Dataset, config: dict) -> xr.Dataset:
     """Enforce data types on variables based on the configuration file."""
     variable_specs = {
