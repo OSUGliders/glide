@@ -7,6 +7,8 @@
 
 --- ### CORE VARIABLES (always extracted)
 
+# MEASURED — extracted directly from raw glider files (have a `source` field)
+
 time:
   source: ["m_present_time", "sci_m_present_time"]
   track_qc: True
@@ -98,16 +100,6 @@ lon_gps:
     valid_min: -180.0
     coordinate_reference_frame: urn:ogc:crs:EPSG::4326
 
-time_gps:
-  drop_from_l3: True
-  CF:
-    calendar: gregorian
-    long_name: GPS Fix Time
-    observation_type: measured
-    source_sensor: m_present_time
-    standard_name: time
-    units: seconds since 1970-01-01T00:00:00Z
-
 m_depth:
   source: m_depth
   drop_from_l2: True
@@ -177,8 +169,6 @@ temperature:
     precision: 0.001
     resolution: 0.0002
 
-# Core flight
-
 pitch:
   source: m_pitch
   conversion: rad_to_deg
@@ -205,7 +195,21 @@ roll:
     valid_max: 180.0
     valid_min: -180.0
 
-# Velocity variables (on time_uv dimension)
+# PIPELINE — added by named processing functions (no `source` field)
+
+# GPS coordinates (add_gps_fixes): valid surface fixes on a dedicated time_gps dimension
+
+time_gps:
+  drop_from_l3: True
+  CF:
+    calendar: gregorian
+    long_name: GPS Fix Time
+    observation_type: measured
+    source_sensor: m_present_time
+    standard_name: time
+    units: seconds since 1970-01-01T00:00:00Z
+
+# Depth-averaged velocity (add_velocity): one value per dive cycle on time_uv dimension
 
 u:
   dtype: f4
@@ -269,7 +273,7 @@ lon_uv:
     valid_max: 180.0
     valid_min: -180.0
 
-# Profile identification variables
+# Profile identification (get_profiles): dive/climb labels on the main time dimension
 
 dive_id:
   dtype: i4
@@ -291,7 +295,7 @@ state:
     flag_values: [-1, 0, 1, 2]
     flag_meanings: "unknown surface dive climb"
 
---- ### OPTIONAL SUITE: flight
+--- ### OPTIONAL SUITE: flight (measured)
 
 heading:
   source: m_heading
@@ -330,9 +334,12 @@ ballast_pumped:
     units: cm^3
     observation_type: measured
 
---- ### OPTIONAL SUITE: thermo
+--- ### OPTIONAL SUITE: thermo (derived)
+
+# Tier 1 — derived from measured CTD variables
 
 salinity:
+  derived_from: [conductivity, temperature, pressure]
   track_qc: True
   dtype: f4
   CF:
@@ -345,7 +352,54 @@ salinity:
     valid_max: 40.0
     valid_min: 0.0
 
+# Tier 2 — derived from Tier 1
+
+SA:
+  derived_from: [salinity, pressure, lon, lat]
+  track_qc: True
+  dtype: f4
+  CF:
+    instrument: instrument_ctd
+    long_name: Absolute salinity
+    observation_type: calculated
+    platform: platform
+    standard_name: sea_water_absolute_salinity
+    units: g kg-1
+    valid_max: 40.0
+    valid_min: 0.0
+
+z:
+  derived_from: [pressure, lat]
+  track_qc: True
+  dtype: f4
+  CF:
+    long_name: Height
+    standard_name: height
+    units: m
+    valid_min: -2000.0
+    valid_max: 0.0
+    positive: up
+    reference_datum: sea-surface
+    instrument: instrument_ctd
+    observation_type: calculated
+
+# Tier 3 — derived from Tier 2
+
+CT:
+  derived_from: [SA, temperature, pressure]
+  track_qc: True
+  dtype: f4
+  CF:
+    long_name: Conservative temperature
+    standard_name: sea_water_conservative_temperature
+    units: celsius
+    instrument: instrument_ctd
+    valid_min: -5.0
+    valid_max: 50.0
+    observation_type: calculated
+
 density:
+  derived_from: [SA, temperature, pressure]
   track_qc: True
   dtype: f4
   CF:
@@ -359,6 +413,7 @@ density:
     valid_min: 1015.0
 
 rho0:
+  derived_from: [SA, temperature, pressure]
   track_qc: True
   dtype: f4
   CF:
@@ -372,55 +427,8 @@ rho0:
     valid_max: 1040.0
     valid_min: 1015.0
 
-SA:
-  track_qc: True
-  dtype: f4
-  CF:
-    instrument: instrument_ctd
-    long_name: Absolute salinity
-    observation_type: calculated
-    platform: platform
-    standard_name: sea_water_absolute_salinity
-    units: g kg-1
-    valid_max: 40.0
-    valid_min: 0.0
-
-CT:
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Conservative temperature
-    standard_name: sea_water_conservative_temperature
-    units: celsius
-    instrument: instrument_ctd
-    valid_min: -5.0
-    valid_max: 50.0
-    observation_type: calculated
-
-
-sound_speed:
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Sound speed
-    standard_name: speed_of_sound_in_sea_water
-    units: m s-1
-    instrument: instrument_ctd
-    valid_min: 1400.0
-    valid_max: 1600.0
-    observation_type: calculated
-
-
-N2:
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Buoyancy frequency squared
-    standard_name: square_of_brunt_vaisala_frequency_in_sea_water
-    units: s-2
-    observation_type: calculated
-
 depth:
+  derived_from: [z]
   track_qc: True
   dtype: f4
   CF:
@@ -434,16 +442,27 @@ depth:
     instrument: instrument_ctd
     observation_type: calculated
 
-z:
+# Tier 4 — derived from Tier 3
+
+sound_speed:
+  derived_from: [SA, CT, pressure]
   track_qc: True
   dtype: f4
   CF:
-    long_name: Height
-    standard_name: height
-    units: m
-    valid_min: -2000.0
-    valid_max: 0.0
-    positive: up
-    reference_datum: sea-surface
+    long_name: Sound speed
+    standard_name: speed_of_sound_in_sea_water
+    units: m s-1
     instrument: instrument_ctd
+    valid_min: 1400.0
+    valid_max: 1600.0
+    observation_type: calculated
+
+N2:
+  derived_from: [SA, CT, pressure, lat]
+  track_qc: True
+  dtype: f4
+  CF:
+    long_name: Buoyancy frequency squared
+    standard_name: square_of_brunt_vaisala_frequency_in_sea_water
+    units: s-2
     observation_type: calculated
