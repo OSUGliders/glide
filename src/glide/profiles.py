@@ -1,5 +1,3 @@
-# Profile finding and velocity assignment functions for L2 processing.
-
 import logging
 
 import numpy as np
@@ -31,8 +29,8 @@ def get_profiles(
     if np.issubdtype(raw_diff.dtype, np.timedelta64):
         dt_s = float(np.nanmedian(raw_diff.astype("timedelta64[s]").astype("f8")))
     else:
-        dt_s = float(np.nanmedian(raw_diff))  # already float seconds
-    fs = 1.0 / dt_s  # samples per second
+        dt_s = float(np.nanmedian(raw_diff))
+    fs = 1.0 / dt_s
 
     peaks_kwargs = {
         "height": shallowest_profile,
@@ -57,6 +55,7 @@ def get_profiles(
         ds.pressure.values,
         peaks_kwargs=peaks_kwargs,
         troughs_kwargs=troughs_kwargs,
+        min_pressure=shallowest_profile,
         missing="drop",
     )
 
@@ -109,11 +108,14 @@ def assign_surface_state(
     ds: xr.Dataset,
     flt: xr.Dataset | None = None,
     dt: float = 300.0,
+    surface_pressure: float = 2.0,
 ) -> xr.Dataset:
     """Assign surface state (0) to unknown points near GPS fixes.
 
-    Points with state == -1 (unknown) that are within `dt` seconds of a valid
-    GPS fix are marked as surface state (0).
+    A point with state == -1 (unknown) is marked as surface (0) only if it is
+    within `dt` seconds of a valid GPS fix AND shallower than `surface_pressure`
+    dbar.  The pressure gate prevents the broad GPS time window from reaching
+    into adjacent dives.
 
     Parameters
     ----------
@@ -123,16 +125,10 @@ def assign_surface_state(
         Raw flight data containing m_gps_lat/lon with valid GPS fix times.
     dt : float
         Time threshold in seconds for matching to GPS fixes (default 300).
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with updated state variable.
+    surface_pressure : float
+        Maximum pressure (dbar) for a point to be considered at the surface
+        (default 2.0).
     """
-    if "state" not in ds:
-        _log.warning("No state variable in dataset")
-        return ds
-
     if flt is None or "m_gps_lat" not in flt:
         _log.warning("No flight data with GPS, cannot assign surface state")
         return ds
@@ -162,6 +158,11 @@ def assign_surface_state(
             np.inf,
         )
         is_near = np.minimum(dist_left, dist_right) <= dt
+        is_shallow = np.isfinite(ds.pressure.values[unknown_mask]) & (
+            ds.pressure.values[unknown_mask] < surface_pressure
+        )
+        is_near = is_near & is_shallow
+
         state[unknown_mask] = np.where(is_near, np.int8(0), state[unknown_mask])
         _log.debug("Assigned %d points to surface state", int(is_near.sum()))
 
@@ -205,12 +206,9 @@ def _extract_velocity_data(
     u_vals = u_vals[order]
     v_vals = v_vals[order]
 
-    # Cluster velocity reports by surfacing events. Multiple reports within
-    # minutes of each other are refined estimates at the same surfacing; a gap
-    # longer than gap_threshold indicates a new dive/surface cycle. Take the
-    # last (best) report from each surfacing.
-    gap_threshold = 600  # seconds (10 minutes)
-    new_surfacing = np.concatenate(([True], np.diff(times) > gap_threshold))
+    # Multiple reports per surfacing are refined estimates; take the last (best)
+    # from each cluster. A gap > 600 s marks a new dive/surface cycle.
+    new_surfacing = np.concatenate(([True], np.diff(times) > 600))
     ends = np.concatenate((np.where(new_surfacing)[0][1:], [len(times)])) - 1
 
     _log.debug(
@@ -269,21 +267,15 @@ def add_velocity(
 
     vel_times, vel_u, vel_v = _extract_velocity_data(flt)
 
-    groups = []  # list of (profile_mask, u_val, v_val)
+    groups = []
 
-    if (
-        vel_times is not None
-        and vel_u is not None
-        and vel_v is not None
-        and len(vel_times) > 0
-    ):
+    if vel_times is not None and len(vel_times) > 0:
         for i, t_vel in enumerate(vel_times):
             t_start = vel_times[i - 1] if i > 0 else -np.inf
             mask = (time_l2 > t_start) & (time_l2 <= t_vel) & is_profile
             if mask.any():
                 groups.append((mask, vel_u[i], vel_v[i]))
 
-        # Trailing profiles after the last velocity report (awaiting surfacing)
         mask = (time_l2 > vel_times[-1]) & is_profile
         if mask.any():
             groups.append((mask, np.nan, np.nan))

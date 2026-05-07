@@ -272,65 +272,105 @@ def test_merge_does_not_overwrite_existing_qc() -> None:
     )
 
 
-def test_assign_surface_state() -> None:
-    """Test that surface state is assigned to unknown points near GPS fixes."""
-    # Create a synthetic L2 dataset with state variable
-    n = 100
+def _make_surface_state_inputs(
+    n: int = 100,
+    dive_slice: slice = slice(20, 40),
+    climb_slice: slice = slice(40, 60),
+    gps_fix_indices: list[int] | None = None,
+    pressure: np.ndarray | None = None,
+) -> tuple[xr.Dataset, xr.Dataset]:
+    """Build synthetic (ds, flt) pair for assign_surface_state tests."""
+    if gps_fix_indices is None:
+        gps_fix_indices = [5, 10, 70, 80]
+
     time = np.arange(n, dtype=float)
-
-    # State: surface at start, dive in middle, surface at end
-    # -1 = unknown, 0 = surface, 1 = dive, 2 = climb
     state = np.full(n, -1, dtype="b")
-    state[20:40] = 1  # dive
-    state[40:60] = 2  # climb
+    state[dive_slice] = 1
+    state[climb_slice] = 2
 
-    ds = xr.Dataset(
-        {
-            "state": (
-                "time",
-                state,
-                dict(
-                    long_name="Glider state",
-                    flag_values=np.array([-1, 0, 1, 2], "b"),
-                    flag_meanings="unknown surface dive climb",
-                ),
+    ds_vars: dict = {
+        "state": (
+            "time",
+            state,
+            dict(
+                long_name="Glider state",
+                flag_values=np.array([-1, 0, 1, 2], "b"),
+                flag_meanings="unknown surface dive climb",
             ),
-        },
+        ),
+    }
+    if pressure is not None:
+        ds_vars["pressure"] = ("time", pressure)
+    ds = xr.Dataset(ds_vars, coords={"time": time})
+
+    gps_lat = np.full(n, np.nan)
+    for idx in gps_fix_indices:
+        gps_lat[idx] = 45.0
+    flt = xr.Dataset(
+        {"m_gps_lat": ("time", gps_lat), "m_present_time": ("time", time)},
         coords={"time": time},
     )
+    return ds, flt
 
-    # Create flight data with GPS fixes at surface times
-    flt_time = np.arange(n, dtype=float)
-    gps_lat = np.full(n, np.nan)
-    gps_lat[5] = 45.0  # GPS fix near start (surface)
-    gps_lat[10] = 45.0  # Another GPS fix (surface)
-    gps_lat[70] = 45.0  # GPS fix near end (surface)
-    gps_lat[80] = 45.0  # Another GPS fix (surface)
 
-    flt = xr.Dataset(
-        {
-            "m_gps_lat": ("time", gps_lat),
-            "m_present_time": ("time", flt_time),
-        },
-        coords={"time": flt_time},
-    )
+def test_assign_surface_state() -> None:
+    """Shallow unknown points near GPS fixes are marked surface; deep ones are not."""
+    n = 100
+    pressure = np.full(n, np.nan)
+    # Surface regions: indices 0-19 and 60-99 → shallow
+    pressure[:20] = 0.5
+    pressure[60:] = 0.5
+    # Dive/climb region: deep
+    pressure[20:60] = 50.0
 
-    # Apply surface state assignment
-    result = prof.assign_surface_state(ds, flt, dt=15.0)
+    ds, flt = _make_surface_state_inputs(n=n, pressure=pressure)
 
-    # Check that unknown states near GPS fixes are now surface (0)
-    assert result.state.values[5] == 0, "Point at GPS fix should be surface"
-    assert result.state.values[10] == 0, "Point at GPS fix should be surface"
-    assert result.state.values[70] == 0, "Point near GPS fix should be surface"
-    assert result.state.values[80] == 0, "Point near GPS fix should be surface"
+    result = prof.assign_surface_state(ds, flt, dt=15.0, surface_pressure=2.0)
 
-    # Check that dive/climb states are unchanged
+    # Shallow points at GPS fix times → surface
+    assert result.state.values[5] == 0, "Shallow point at GPS fix should be surface"
+    assert result.state.values[10] == 0, "Shallow point at GPS fix should be surface"
+    assert result.state.values[70] == 0, "Shallow point at GPS fix should be surface"
+    assert result.state.values[80] == 0, "Shallow point at GPS fix should be surface"
+
+    # Dive/climb states are unchanged
     assert np.all(result.state.values[20:40] == 1), "Dive states should be unchanged"
     assert np.all(result.state.values[40:60] == 2), "Climb states should be unchanged"
 
-    # Check that unknown states far from GPS fixes remain unknown
-    assert result.state.values[30] == 1, "Mid-dive should still be dive"
-    assert result.state.values[50] == 2, "Mid-climb should still be climb"
+
+def test_assign_surface_state_pressure_gate() -> None:
+    """Deep unknown points near GPS fixes must NOT be assigned surface state.
+
+    This is the regression test for the bug where the flight computer's high
+    GPS sampling rate (many fixes per surfacing) caused the time-proximity
+    window to reach into adjacent dives at depth.
+    """
+    n = 100
+    pressure = np.full(n, 50.0)  # all points at 50 dbar — definitely not surface
+    pressure[5] = 0.5  # only index 5 is actually shallow
+
+    # GPS fix at index 5 (shallow, outside dive/climb) and index 65 (deep,
+    # outside dive/climb so state starts as -1 — the exact case where the bug
+    # would erroneously assign state 0).
+    ds, flt = _make_surface_state_inputs(
+        n=n, gps_fix_indices=[5, 65], pressure=pressure
+    )
+
+    result = prof.assign_surface_state(ds, flt, dt=15.0, surface_pressure=2.0)
+
+    # Only the shallow point near a GPS fix should become surface
+    assert result.state.values[5] == 0, "Shallow point at GPS fix should be surface"
+
+    # Deep point coinciding with a GPS fix must stay unknown
+    assert result.state.values[65] == -1, (
+        "Deep point at GPS fix must not be marked surface"
+    )
+
+    # Deep points near but not at the GPS fix must also stay unknown
+    for idx in [61, 63, 67, 69]:
+        assert result.state.values[idx] == -1, (
+            f"Deep point at index {idx} must not be marked surface"
+        )
 
 
 def test_assign_surface_state_no_flight_data() -> None:
