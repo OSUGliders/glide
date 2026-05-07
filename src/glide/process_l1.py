@@ -719,32 +719,52 @@ def add_gps_fixes(ds: xr.Dataset, flt: xr.Dataset, config: dict) -> xr.Dataset:
     """Add surface GPS fixes on a separate time_gps dimension.
 
     Valid (non-NaN) fixes from the post-QC flight dataset are placed on a
-    time_gps coordinate, independent of the science time vector. This preserves
-    the original fix timestamps rather than interpolating GPS positions onto
-    the science time grid.
+    time_gps coordinate, independent of the science time vector.
+
+    Any variable in the config with ``companion_dim: time_gps`` is also placed
+    on this dimension at the valid fix indices, provided the variable is present
+    in the flight dataset. The validity mask is defined by the ``anchor``
+    variables listed on the ``time_gps`` config entry.
     """
-    if "lat_gps" not in flt or "lon_gps" not in flt:
-        _log.debug("No GPS variables in flight dataset, skipping GPS fixes")
+    specs = config["variables"]
+    time_gps_spec = specs.get("time_gps", {})
+    anchor_vars = time_gps_spec.get("anchor", ["lat_gps", "lon_gps"])
+
+    anchor_present = [v for v in anchor_vars if v in flt]
+    if not anchor_present:
+        _log.debug(
+            "No anchor variables for time_gps in flight dataset, skipping GPS fixes"
+        )
         return ds
 
-    specs = config["variables"]
-
-    lat_vals = flt.lat_gps.values
-    lon_vals = flt.lon_gps.values
     time_vals = flt.time.values
+    valid = np.ones(len(time_vals), dtype=bool)
+    for v in anchor_present:
+        valid &= np.isfinite(flt[v].values)
 
-    valid = np.isfinite(lat_vals) & np.isfinite(lon_vals)
     n_valid = int(valid.sum())
-
     if n_valid == 0:
         _log.debug("No valid GPS fixes found")
         return ds
 
     _log.debug("Adding %d surface GPS fixes on time_gps dimension", n_valid)
+    ds["time_gps"] = (("time_gps",), time_vals[valid], time_gps_spec.get("CF", {}))
 
-    ds["time_gps"] = (("time_gps",), time_vals[valid], specs["time_gps"]["CF"])
-    ds["lat_gps"] = (("time_gps",), lat_vals[valid], specs["lat_gps"]["CF"])
-    ds["lon_gps"] = (("time_gps",), lon_vals[valid], specs["lon_gps"]["CF"])
+    # Anchor variables are always written (they define the coordinate)
+    for v in anchor_present:
+        ds[v] = (("time_gps",), flt[v].values[valid], specs.get(v, {}).get("CF", {}))
+
+    companion_vars = [
+        v
+        for v, s in specs.items()
+        if s.get("companion_dim") == "time_gps" and v not in anchor_present
+    ]
+    for v in companion_vars:
+        if v not in flt:
+            _log.debug("Companion variable %s not in flight dataset, skipping", v)
+            continue
+        ds[v] = (("time_gps",), flt[v].values[valid], specs[v].get("CF", {}))
+        _log.debug("Added companion variable %s on time_gps dimension", v)
 
     return ds
 

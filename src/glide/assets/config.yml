@@ -60,8 +60,25 @@ qc: {}
 #     CF:
 #       long_name: Fin angle
 #       units: degrees
-
-l1_variables: {}
+#
+# COMPANION VARIABLES
+# A companion variable is placed on a dedicated coordinate dimension (e.g.
+# time_gps) instead of the main science time grid. Use this to include
+# additional metadata alongside surface GPS fixes. companion_dim and
+# drop_from_l2 are both required.
+#
+# l1_variables:
+#   hdop_gps:
+#     source: m_gps_uncertainty   # GPS dilution of precision
+#     companion_dim: time_gps
+#     drop_from_l2: True
+#     dtype: f4
+#     CF:
+#       long_name: GPS horizontal dilution of precision
+#       units: "1"
+#       valid_min: 0.5
+#       valid_max: 99.9
+#       observation_type: measured
 
 --- ### MERGED VARIABLES
 

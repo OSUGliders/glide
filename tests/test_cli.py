@@ -130,6 +130,23 @@ def test_gps() -> None:
     assert result.exit_code == 0
 
 
+def test_gps_fixes() -> None:
+    import pandas as pd
+
+    l2_file = str(resources.files("tests").joinpath("data/slocum.l2.nc"))
+    out_file = str(resources.files("tests").joinpath("data/slocum.gps_fixes.csv"))
+    result = runner.invoke(app, ["gps", l2_file, "-o", out_file, "--fixes"])
+
+    assert result.exit_code == 0, result.output
+
+    df = pd.read_csv(out_file, index_col=0)
+    assert "lat_gps" in df.columns
+    assert "lon_gps" in df.columns
+    assert len(df) > 0
+    assert df["lat_gps"].notna().all()
+    assert df["lon_gps"].notna().all()
+
+
 def test_backfill() -> None:
     """Test the backfill command for updating velocity in L2 files.
 

@@ -21,6 +21,7 @@ wheels/
 *.nc
 *.mat
 tests/data/slocum.gps.csv
+tests/data/slocum.gps_fixes.csv
 
 # Notebooks
 *.ipynb

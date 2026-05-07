@@ -320,15 +320,26 @@ def hot(
 def gps(
     l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
     out_file: _out_file_annotation = "slocum.gps.csv",
+    fixes_only: Annotated[
+        bool,
+        typer.Option(
+            "--fixes",
+            help="Extract surface GPS fixes on the time_gps dimension instead of "
+            "interpolated positions on the science time grid.",
+        ),
+    ] = False,
 ) -> None:
     """
     Generate gps csv file from L2 data.
     """
     l2 = process_l2.parse_l2(l2_file)
 
-    gps = hotel.extract_gps(l2)
+    if fixes_only:
+        out = hotel.extract_gps_fixes(l2)
+    else:
+        out = hotel.extract_gps(l2)
 
-    gps.to_dataframe().to_csv(out_file)
+    out.to_dataframe().to_csv(out_file)
 
 
 @app.command()
