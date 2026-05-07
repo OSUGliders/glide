@@ -7,12 +7,94 @@ from profinder import find_profiles
 _log = logging.getLogger(__name__)
 
 
+def _detect_drift(
+    pressure: np.ndarray,
+    time: np.ndarray,
+    dt_s: float,
+    flt: xr.Dataset | None = None,
+    min_drift_duration: float = 600.0,
+    pressure_std_threshold: float = 2.0,
+    surface_pressure: float = 2.0,
+) -> np.ndarray:
+    """Return boolean mask True where glider is drifting at depth.
+
+    Uses x_target_hover_depth from raw flight data if available (non-NaN and
+    > 0 indicates hover/drift mode is active); falls back to a rolling-variance
+    detector on the pressure signal.  A candidate region must have rolling
+    pressure std < pressure_std_threshold and pressure > surface_pressure
+    sustained for at least min_drift_duration seconds.
+    """
+    n = len(pressure)
+    drift = np.zeros(n, dtype=bool)
+
+    if flt is not None and "x_target_hover_depth" in flt:
+        flt_time = flt.m_present_time.values
+        hover_depth = flt.x_target_hover_depth.values
+        order = np.argsort(flt_time)
+        flt_time = flt_time[order]
+        hover_depth = hover_depth[order]
+        pos = np.searchsorted(flt_time, time)
+        pos_left = np.maximum(pos - 1, 0)
+        pos_right = np.minimum(pos, len(flt_time) - 1)
+        nearest = np.where(
+            np.abs(time - flt_time[pos_left]) <= np.abs(time - flt_time[pos_right]),
+            pos_left,
+            pos_right,
+        )
+        drift = np.isfinite(hover_depth[nearest]) & (hover_depth[nearest] > 0)
+        _log.debug("Drift: %d points from x_target_hover_depth", int(drift.sum()))
+        return drift
+
+    valid = np.isfinite(pressure)
+    if not valid.any():
+        return drift
+
+    # Window = min_drift_duration / 4; smaller window reduces edge miss at drift boundaries.
+    # np.convolve mode='same' returns max(n, window) elements, so cap half so window < n.
+    half = min((n - 1) // 2, max(2, round(min_drift_duration / 4 / dt_s)))
+    window = 2 * half + 1
+    ones = np.ones(window)
+
+    p_fill = np.where(valid, pressure, 0.0)
+    cnt_w = np.convolve(valid.astype(float), ones, mode="same")
+    sum_w = np.convolve(p_fill, ones, mode="same")
+    sumsq_w = np.convolve(p_fill**2, ones, mode="same")
+
+    safe_cnt = np.where(cnt_w >= 3, cnt_w, 1.0)
+    mean_w = sum_w / safe_cnt
+    var_w = sumsq_w / safe_cnt - mean_w**2
+    rolling_std = np.where(cnt_w >= 3, np.sqrt(np.maximum(0.0, var_w)), np.inf)
+
+    candidate = (
+        valid & (pressure > surface_pressure) & (rolling_std < pressure_std_threshold)
+    )
+
+    # Keep only contiguous runs that span at least min_drift_duration
+    i = 0
+    while i < n:
+        if not candidate[i]:
+            i += 1
+            continue
+        j = i + 1
+        while j < n and candidate[j]:
+            j += 1
+        if (j - i) * dt_s >= min_drift_duration:
+            drift[i:j] = True
+        i = j
+
+    _log.debug("Drift: %d points from pressure-based detector", int(drift.sum()))
+    return drift
+
+
 def get_profiles(
     ds: xr.Dataset,
     shallowest_profile: float,
     min_surface_time: float = 180.0,
+    flt: xr.Dataset | None = None,
+    min_drift_duration: float = 600.0,
+    drift_pressure_std: float = 2.0,
 ) -> xr.Dataset:
-    """Identify dive and climb profiles from a pressure time series.
+    """Identify dive, climb, and drift profiles from a pressure time series.
 
     Parameters
     ----------
@@ -24,6 +106,15 @@ def get_profiles(
         Minimum time (seconds) between consecutive dive apexes.  Used to
         compute sample-count thresholds so the detector adapts to the data
         sampling rate.  A value of ~180 s works for most Slocum deployments.
+    flt : xr.Dataset, optional
+        Raw flight data.  Used to detect drift-at-depth via BAW_HOVER_ACTIVE
+        when present; otherwise pressure-based detection is used.
+    min_drift_duration : float
+        Minimum duration (seconds) for a constant-pressure period to be
+        classified as drift (default 600 s).
+    drift_pressure_std : float
+        Rolling pressure standard deviation threshold (dbar) for pressure-based
+        drift detection (default 2.0 dbar).
     """
     raw_diff = np.diff(ds.time.values)
     if np.issubdtype(raw_diff.dtype, np.timedelta64):
@@ -31,6 +122,21 @@ def get_profiles(
     else:
         dt_s = float(np.nanmedian(raw_diff))
     fs = 1.0 / dt_s
+
+    drift_mask = _detect_drift(
+        ds.pressure.values,
+        ds.time.values,
+        dt_s,
+        flt=flt,
+        min_drift_duration=min_drift_duration,
+        pressure_std_threshold=drift_pressure_std,
+    )
+
+    # Mask drift before profile finding so profinder sees a gap across the
+    # drift period; with missing="drop" it will pair the real climb after
+    # drift with the correct dive.
+    pressure_masked = ds.pressure.values.copy().astype(float)
+    pressure_masked[drift_mask] = np.nan
 
     peaks_kwargs = {
         "height": shallowest_profile,
@@ -52,7 +158,7 @@ def get_profiles(
     )
 
     profiles = find_profiles(
-        ds.pressure.values,
+        pressure_masked,
         peaks_kwargs=peaks_kwargs,
         troughs_kwargs=troughs_kwargs,
         missing="drop",
@@ -85,6 +191,12 @@ def get_profiles(
         climb_counter += 1
         profile_counter += 1
 
+    # Override drift points, clearing any profile membership assigned above
+    state[drift_mask] = 3
+    dive_id[drift_mask] = -1
+    climb_id[drift_mask] = -1
+    profile_id[drift_mask] = -1
+
     ds["dive_id"] = ("time", dive_id, dict(_FillValue=np.int32(-1)))
     ds["climb_id"] = ("time", climb_id, dict(_FillValue=np.int32(-1)))
     ds["profile_id"] = ("time", profile_id, dict(_FillValue=np.int32(-1)))
@@ -93,9 +205,9 @@ def get_profiles(
         state,
         dict(
             long_name="Glider state",
-            flag_values=np.array([-1, 0, 1, 2], "b"),
-            flag_meanings="unknown surface dive climb",
-            valid_max=np.int8(2),
+            flag_values=np.array([-1, 0, 1, 2, 3], "b"),
+            flag_meanings="unknown surface dive climb drift",
+            valid_max=np.int8(3),
             valid_min=np.int8(-1),
         ),
     )

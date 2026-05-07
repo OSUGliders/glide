@@ -2,6 +2,7 @@ from importlib import resources
 
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 import glide.gliderdac as gd
@@ -911,3 +912,129 @@ def test_emit_ioos_profiles_yo_yo_shares_time_uv(tmp_path) -> None:
     # All four profiles share the same scalar time_uv (= the segment's value).
     assert all(t == time_uvs[0] for t in time_uvs)
     assert time_uvs[0] == 25.0
+
+
+def _make_drift_at_depth_dataset(dt_s: float) -> tuple[xr.Dataset, float, float, float]:
+    """Synthetic glider dataset with one dive-overshoot-drift-climb cycle.
+
+    Returns (ds, t_dive_start, t_drift_start, t_climb_start) in seconds.
+
+    Pressure trace:
+      - Surface at ~0.5 dbar for 120 s
+      - Dive to 105 dbar (target 100, overshoot by 5 dbar) over 1500 s
+      - Overshoot correction: 105→100 dbar over 120 s  ← wrongly identified as
+        the climb before this fix
+      - Drift at 100 ± 2 dbar (sinusoidal wobble, period 300 s) for 3600 s
+      - Climb from 100 to surface over 1500 s
+      - Surface at ~0.5 dbar for 120 s
+    """
+    t_surface = 120.0
+    t_dive = 1500.0
+    t_overshoot = 120.0
+    t_drift = 3600.0
+    t_climb = 1500.0
+
+    t0_dive = t_surface
+    t0_overshoot = t0_dive + t_dive
+    t0_drift = t0_overshoot + t_overshoot
+    t0_climb = t0_drift + t_drift
+    t_total = t0_climb + t_climb + t_surface
+
+    t = np.arange(0.0, t_total, dt_s)
+    p = np.full(len(t), 0.5)
+
+    mask = (t >= t0_dive) & (t < t0_overshoot)
+    p[mask] = 105.0 * (t[mask] - t0_dive) / t_dive
+
+    mask = (t >= t0_overshoot) & (t < t0_drift)
+    p[mask] = 105.0 - 5.0 * (t[mask] - t0_overshoot) / t_overshoot
+
+    mask = (t >= t0_drift) & (t < t0_climb)
+    p[mask] = 100.0 + 2.0 * np.sin(2.0 * np.pi * (t[mask] - t0_drift) / 300.0)
+
+    mask = (t >= t0_climb) & (t < t0_climb + t_climb)
+    p[mask] = 100.0 * (1.0 - (t[mask] - t0_climb) / t_climb)
+
+    ds = xr.Dataset({"pressure": ("time", p)}, coords={"time": t})
+    return ds, t0_dive, t0_drift, t0_climb
+
+
+@pytest.mark.parametrize(
+    "dt_s",
+    [1.0, 15.0],
+    ids=["post_recovery_1s", "realtime_15s"],
+)
+def test_get_profiles_drift_at_depth(dt_s: float) -> None:
+    """Drift-at-depth is detected and labelled state=3; the real climb after
+    drift must span the full water column rather than being cut off.
+
+    Without drift masking, the overshoot correction (105→100 dbar before the
+    drift plateau) would be mis-identified as the climb portion, leaving the
+    actual ascent unlabelled.
+    """
+    ds, _t_dive, t_drift_start, t_climb_start = _make_drift_at_depth_dataset(dt_s)
+
+    result = prof.get_profiles(ds, shallowest_profile=5.0, min_surface_time=180.0)
+
+    state = result.state.values
+    time = ds.time.values
+
+    # Most of the drift plateau must be labelled state=3
+    drift_state = state[(time >= t_drift_start) & (time < t_climb_start)]
+    assert (drift_state == 3).mean() > 0.7, (
+        f"Only {(drift_state == 3).mean():.1%} of drift period is state=3 at dt_s={dt_s}"
+    )
+
+    # Most of the real climb after drift must be labelled state=2
+    climb_state = state[time >= t_climb_start]
+    assert (climb_state == 2).mean() > 0.7, (
+        f"Only {(climb_state == 2).mean():.1%} of real climb is state=2 at dt_s={dt_s}"
+    )
+
+    # The climb profile must span the full water column
+    climb_pressures = ds.pressure.values[state == 2]
+    assert climb_pressures.max() > 90.0, (
+        "Climb profile must include deep data near 100 dbar"
+    )
+    assert climb_pressures.min() < 5.0, "Climb profile must reach the near-surface"
+
+    # state=3 (drift) must appear in the CF flag_values
+    assert 3 in result.state.attrs["flag_values"]
+
+
+def test_get_profiles_drift_x_target_hover_depth() -> None:
+    """x_target_hover_depth in raw flight data takes precedence over pressure-based
+    drift detection and marks the exact drift period as state=3."""
+    dt_s = 15.0
+    ds, _t_dive, t_drift_start, t_climb_start = _make_drift_at_depth_dataset(dt_s)
+
+    time = ds.time.values
+
+    # Synthetic flight data at 4 s intervals with target hover depth set during drift
+    flt_time = np.arange(0.0, time[-1] + 4.0, 4.0)
+    hover_depth = np.full(len(flt_time), np.nan)
+    hover_depth[(flt_time >= t_drift_start) & (flt_time < t_climb_start)] = 100.0
+
+    flt = xr.Dataset(
+        {
+            "m_present_time": ("i", flt_time),
+            "x_target_hover_depth": ("i", hover_depth),
+        }
+    )
+
+    result = prof.get_profiles(
+        ds, shallowest_profile=5.0, min_surface_time=180.0, flt=flt
+    )
+
+    state = result.state.values
+    drift_mask = (time >= t_drift_start) & (time < t_climb_start)
+
+    # BAW_HOVER_ACTIVE covers the drift period exactly, so detection should be
+    # almost complete (within one 4 s flight sample of each boundary)
+    assert (state[drift_mask] == 3).mean() > 0.9, (
+        "BAW_HOVER_ACTIVE should detect drift with >90% coverage"
+    )
+
+    # Real climb after drift must still be captured
+    climb_state = state[time >= t_climb_start]
+    assert (climb_state == 2).mean() > 0.7
