@@ -5,11 +5,11 @@ import inspect
 import logging
 from importlib.metadata import version
 from pathlib import Path
+from typing import Annotated
 
 import netCDF4 as nc
 import typer
 import xarray as xr
-from typing import Annotated
 
 from . import (
     ancillery,
