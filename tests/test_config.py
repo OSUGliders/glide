@@ -45,7 +45,9 @@ def test_load_config_merged_variables_present():
     # Regression: inserting an extra YAML document shifts the positional parsing
     # in load_config (docs[4]), silently dropping merged_variables entirely.
     conf = config.load_config()
-    assert conf["merged_variables"], "merged_variables should not be empty in default config"
+    assert conf["merged_variables"], (
+        "merged_variables should not be empty in default config"
+    )
     assert "e_1" in conf["merged_variables"]
     assert "e_2" in conf["merged_variables"]
 
@@ -64,8 +66,12 @@ def test_load_config_time_valid_min_max_are_floats():
     conf = config.load_config()
     valid_min = conf["variables"]["time"]["CF"]["valid_min"]
     valid_max = conf["variables"]["time"]["CF"]["valid_max"]
-    assert isinstance(valid_min, float), "time valid_min should be a UTC timestamp float"
-    assert isinstance(valid_max, float), "time valid_max should be a UTC timestamp float"
+    assert isinstance(valid_min, float), (
+        "time valid_min should be a UTC timestamp float"
+    )
+    assert isinstance(valid_max, float), (
+        "time valid_max should be a UTC timestamp float"
+    )
     assert valid_min < valid_max
 
 
