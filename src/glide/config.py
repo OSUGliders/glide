@@ -60,16 +60,16 @@ def _load_core() -> tuple[dict, dict, dict, dict]:
     with open(core_file) as f:
         docs = [doc for doc in safe_load_all(f)]
 
-    if len(docs) < 3:
+    if len(docs) != 4:
         raise ValueError(
-            f"Expected core.yml to contain at least 3 YAML documents (core, "
-            f"flight_attitude, derived_thermo), but found {len(docs)}."
+            f"Expected core.yml to contain exactly 4 YAML documents (core, "
+            f"flight_attitude, derived_thermo, ngdac), but found {len(docs)}."
         )
 
     core = docs[0]
     flight = docs[1]
     thermo = docs[2]
-    ngdac = docs[3] if len(docs) > 3 else {}
+    ngdac = docs[3]
 
     if not isinstance(ngdac, dict):
         raise ValueError(
