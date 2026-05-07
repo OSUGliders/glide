@@ -55,7 +55,6 @@ def get_profiles(
         ds.pressure.values,
         peaks_kwargs=peaks_kwargs,
         troughs_kwargs=troughs_kwargs,
-        min_pressure=shallowest_profile,
         missing="drop",
     )
 
