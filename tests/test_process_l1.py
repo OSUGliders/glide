@@ -460,7 +460,7 @@ def test_realtime_velocity_processing() -> None:
         merged = pl1.calculate_thermodynamics(merged, config)
 
         # Get profiles
-        out = prof.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
+        out = prof.get_profiles(merged, shallowest_profile=5.0, min_surface_time=180.0)
 
         # Assign surface state and add velocity
         out = prof.assign_surface_state(out, flt=flt_raw)
@@ -547,7 +547,7 @@ def test_realtime_velocity_merged() -> None:
     merged = pl1.calculate_thermodynamics(merged, config)
 
     # Get profiles
-    out = prof.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
+    out = prof.get_profiles(merged, shallowest_profile=5.0, min_surface_time=180.0)
 
     # Check that we detected some profiles
     n_dives = (out.dive_id.values >= 0).sum()
@@ -654,7 +654,7 @@ def test_get_profiles_assigns_profile_id() -> None:
         coords={"time": time},
     )
 
-    result = prof.get_profiles(ds, shallowest_profile=5.0, profile_distance=10)
+    result = prof.get_profiles(ds, shallowest_profile=5.0, min_surface_time=60.0)
 
     assert "profile_id" in result
     pid = result.profile_id.values
