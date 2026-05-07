@@ -238,7 +238,12 @@ def add_velocity(
 
     groups = []  # list of (profile_mask, u_val, v_val)
 
-    if vel_times is not None and len(vel_times) > 0:
+    if (
+        vel_times is not None
+        and vel_u is not None
+        and vel_v is not None
+        and len(vel_times) > 0
+    ):
         for i, t_vel in enumerate(vel_times):
             t_start = vel_times[i - 1] if i > 0 else -np.inf
             mask = (time_l2 > t_start) & (time_l2 <= t_vel) & is_profile
