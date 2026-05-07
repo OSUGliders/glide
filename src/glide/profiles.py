@@ -1,3 +1,5 @@
+# Profile finding and velocity assignment functions for L2 processing.
+
 import logging
 
 import numpy as np
