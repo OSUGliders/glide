@@ -1,4 +1,4 @@
-# gliderdac preparation functions split profiles into compliant files 
+# gliderdac preparation functions split profiles into compliant files
 
 import logging
 from datetime import datetime, timezone
