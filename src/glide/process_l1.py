@@ -265,7 +265,7 @@ def apply_qc(
     ds = ds.swap_dims({dim: "time"})
     # The old index dim survives as a non-dimension coord, drop it.
     if dim in ds.coords:
-        ds = ds.drop_vars(dim)
+        ds = ds.drop_vars([dim])
 
     # Applying gps QC will only work on flight data
     # so we need this to catch parsing of science data.
