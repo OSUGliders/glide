@@ -1,7 +1,10 @@
 # Level 2 processing parses level 1 data produced by dbd2netcdf.
 # Some quality control is performed. CF attributes are applied.
 
+import glob
 import logging
+import re
+from pathlib import Path
 
 import gsw
 import numpy as np
@@ -12,6 +15,18 @@ from . import convert as conv
 from . import qc
 
 _log = logging.getLogger(__name__)
+
+_FLT_INFIXES = ("sbd", "dbd")
+_SCI_INFIXES = ("tbd", "ebd")
+_INPUT_EXTS = ("nc", "csv")
+_FILE_RE = re.compile(
+    r"^(?P<stem>.+)\.(?P<infix>"
+    + "|".join(_FLT_INFIXES + _SCI_INFIXES)
+    + r")\.(?P<ext>"
+    + "|".join(_INPUT_EXTS)
+    + r")$"
+)
+
 
 # Helper functions
 
@@ -90,6 +105,113 @@ def _format_variables(
     return ds
 
 
+def _classify_file(path: str) -> tuple[str, str]:
+    """Return ('flt'|'sci', stem) for a recognized glider data file path.
+
+    Raises ValueError if the basename does not match
+    `<stem>.(sbd|dbd|tbd|ebd).(nc|csv)`.
+    """
+    name = Path(path).name
+    match = _FILE_RE.match(name)
+    if match is None:
+        raise ValueError(
+            f"{path!r} does not look like a glider data file "
+            f"(expected <stem>.(sbd|dbd|tbd|ebd).(nc|csv))"
+        )
+    infix = match.group("infix")
+    kind = "flt" if infix in _FLT_INFIXES else "sci"
+    return kind, match.group("stem")
+
+
+def pair_input_files(
+    flt_pattern: str,
+    sci_pattern: str,
+    skip_unpaired: bool = False,
+) -> list[tuple[str, str]]:
+    """Expand glob patterns and pair flight files to science files by stem.
+
+    Each pattern may be a literal filename or a shell-style glob. Every flight
+    file in the expansion of `flt_pattern` must classify as flight
+    (.sbd/.dbd) and every science file must classify as science (.tbd/.ebd).
+
+    Pairing is by basename stem, e.g. `glider-2025-001.sbd.csv` pairs with
+    `glider-2025-001.tbd.csv`. Stems must match exactly.
+
+    By default, raises ValueError if any flight or science file is unpaired.
+    With `skip_unpaired=True`, unpaired files are dropped and a warning is
+    logged.
+    """
+    flt_paths = sorted(glob.glob(flt_pattern)) or (
+        [flt_pattern] if Path(flt_pattern).exists() else []
+    )
+    sci_paths = sorted(glob.glob(sci_pattern)) or (
+        [sci_pattern] if Path(sci_pattern).exists() else []
+    )
+
+    if not flt_paths:
+        raise ValueError(f"No flight files matched pattern {flt_pattern!r}")
+    if not sci_paths:
+        raise ValueError(f"No science files matched pattern {sci_pattern!r}")
+
+    flt_by_stem: dict[str, str] = {}
+    for p in flt_paths:
+        kind, stem = _classify_file(p)
+        if kind != "flt":
+            raise ValueError(
+                f"{p!r} matched the flight pattern but is not a flight file "
+                f"(expected .sbd or .dbd)"
+            )
+        if stem in flt_by_stem:
+            raise ValueError(
+                f"Duplicate flight stem {stem!r}: {flt_by_stem[stem]!r} and {p!r}"
+            )
+        flt_by_stem[stem] = p
+
+    sci_by_stem: dict[str, str] = {}
+    for p in sci_paths:
+        kind, stem = _classify_file(p)
+        if kind != "sci":
+            raise ValueError(
+                f"{p!r} matched the science pattern but is not a science file "
+                f"(expected .tbd or .ebd)"
+            )
+        if stem in sci_by_stem:
+            raise ValueError(
+                f"Duplicate science stem {stem!r}: {sci_by_stem[stem]!r} and {p!r}"
+            )
+        sci_by_stem[stem] = p
+
+    flt_only = sorted(set(flt_by_stem) - set(sci_by_stem))
+    sci_only = sorted(set(sci_by_stem) - set(flt_by_stem))
+    paired_stems = sorted(set(flt_by_stem) & set(sci_by_stem))
+
+    if flt_only or sci_only:
+        msg_parts = []
+        if flt_only:
+            msg_parts.append(
+                f"flight files without a science partner: "
+                f"{[flt_by_stem[s] for s in flt_only]}"
+            )
+        if sci_only:
+            msg_parts.append(
+                f"science files without a flight partner: "
+                f"{[sci_by_stem[s] for s in sci_only]}"
+            )
+        msg = "Unpaired input files; " + "; ".join(msg_parts)
+        if skip_unpaired:
+            _log.warning("%s. Dropping them.", msg)
+        else:
+            raise ValueError(msg + ". Pass --skip-unpaired to drop them.")
+
+    if not paired_stems:
+        raise ValueError(
+            "No flight/science file pairs found; "
+            "every flight file must have a science file with the same stem."
+        )
+
+    return [(flt_by_stem[s], sci_by_stem[s]) for s in paired_stems]
+
+
 # Public API functions
 
 
@@ -141,6 +263,9 @@ def apply_qc(
     dim = list(ds.sizes.keys())[0]
     _log.debug("Swapping dimension %s for time", dim)
     ds = ds.swap_dims({dim: "time"})
+    # The old index dim survives as a non-dimension coord, drop it.
+    if dim in ds.coords:
+        ds = ds.drop_vars([dim])
 
     # Applying gps QC will only work on flight data
     # so we need this to catch parsing of science data.
