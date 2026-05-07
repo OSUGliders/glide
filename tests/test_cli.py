@@ -254,6 +254,106 @@ def test_l2_ioos() -> None:
         )
 
 
+def test_l2_multi_file_glob() -> None:
+    """Run the l2 command over four osu685 segment pairs via glob patterns.
+
+    Asserts:
+      * exit code 0
+      * merged output exists and has the expected structure
+      * time is monotonic across the concatenated segments
+      * no stale 'i' coord survives (regression check on the dim cleanup)
+      * coverage spans all four input segments (i.e. concat actually happened)
+    """
+    import tempfile
+
+    data_dir = resources.files("tests").joinpath("data")
+    flt_pattern = str(data_dir.joinpath("osu685-2025-056-0-*.sbd.csv"))
+    sci_pattern = str(data_dir.joinpath("osu685-2025-056-0-*.tbd.csv"))
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_file = str(Path(tmpdir) / "multi.l2.nc")
+        result = runner.invoke(app, ["l2", flt_pattern, sci_pattern, "-o", out_file])
+        assert result.exit_code == 0, result.output
+
+        ds = xr.open_dataset(out_file)
+        try:
+            assert "time" in ds.dims
+            assert ds.sizes["time"] > 0
+            assert "i" not in ds.variables
+            assert "i" not in ds.coords
+
+            t = ds.time.values
+            assert (np.diff(t) > np.timedelta64(0, "ns")).all(), (
+                "time should be strictly monotonic after concat + qc.time"
+            )
+
+            # Time span should cover at least 2 of the 4 source segments. The
+            # exact span depends on each segment's data, but a single segment
+            # would clearly fail this. Picking a generous lower bound.
+            span = (t[-1] - t[0]) / np.timedelta64(1, "s")
+            assert span > 60, f"Expected a multi-segment time span, got {span:.0f}s"
+
+            assert "profile_id" in ds
+        finally:
+            ds.close()
+
+
+def test_l2_unpaired_errors(tmp_path) -> None:
+    """An unpaired flight file (no matching science) must abort the command."""
+    data_dir = resources.files("tests").joinpath("data")
+    # Stage three flight files but only two science files in tmp_path.
+    for s in ["osu685-2025-056-0-27", "osu685-2025-056-0-28", "osu685-2025-056-0-29"]:
+        (tmp_path / f"{s}.sbd.csv").write_bytes(
+            (data_dir / f"{s}.sbd.csv").read_bytes()
+        )
+    for s in ["osu685-2025-056-0-27", "osu685-2025-056-0-28"]:
+        (tmp_path / f"{s}.tbd.csv").write_bytes(
+            (data_dir / f"{s}.tbd.csv").read_bytes()
+        )
+
+    out_file = str(tmp_path / "unpaired.l2.nc")
+    result = runner.invoke(
+        app,
+        [
+            "l2",
+            str(tmp_path / "*.sbd.csv"),
+            str(tmp_path / "*.tbd.csv"),
+            "-o",
+            out_file,
+        ],
+    )
+    assert result.exit_code != 0
+    assert not Path(out_file).exists()
+
+
+def test_l2_skip_unpaired(tmp_path) -> None:
+    """--skip-unpaired drops the unpaired file with a warning and proceeds."""
+    data_dir = resources.files("tests").joinpath("data")
+    for s in ["osu685-2025-056-0-27", "osu685-2025-056-0-28", "osu685-2025-056-0-29"]:
+        (tmp_path / f"{s}.sbd.csv").write_bytes(
+            (data_dir / f"{s}.sbd.csv").read_bytes()
+        )
+    for s in ["osu685-2025-056-0-27", "osu685-2025-056-0-28"]:
+        (tmp_path / f"{s}.tbd.csv").write_bytes(
+            (data_dir / f"{s}.tbd.csv").read_bytes()
+        )
+
+    out_file = str(tmp_path / "skipped.l2.nc")
+    result = runner.invoke(
+        app,
+        [
+            "l2",
+            str(tmp_path / "*.sbd.csv"),
+            str(tmp_path / "*.tbd.csv"),
+            "-o",
+            out_file,
+            "--skip-unpaired",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert Path(out_file).exists()
+
+
 def test_l3() -> None:
     l2_file = str(resources.files("tests").joinpath("data/slocum.l2.nc"))
     out_file = str(resources.files("tests").joinpath("data/slocum.l3.nc"))

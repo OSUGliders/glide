@@ -34,6 +34,92 @@ def get_realtime_test_data(segment: int, ftype: str = "sbd") -> xr.Dataset:
     )
 
 
+def test_pair_input_files_single(tmp_path) -> None:
+    flt = tmp_path / "g-2025-001.sbd.csv"
+    sci = tmp_path / "g-2025-001.tbd.csv"
+    flt.write_text("")
+    sci.write_text("")
+
+    pairs = pl1.pair_input_files(str(flt), str(sci))
+    assert pairs == [(str(flt), str(sci))]
+
+
+def test_pair_input_files_glob_pairs_by_stem(tmp_path) -> None:
+    stems = ["g-2025-001", "g-2025-002", "g-2025-003"]
+    for s in stems:
+        (tmp_path / f"{s}.sbd.csv").write_text("")
+        (tmp_path / f"{s}.tbd.csv").write_text("")
+
+    pairs = pl1.pair_input_files(
+        str(tmp_path / "*.sbd.csv"), str(tmp_path / "*.tbd.csv")
+    )
+    assert len(pairs) == 3
+    for flt, sci in pairs:
+        assert flt.endswith(".sbd.csv")
+        assert sci.endswith(".tbd.csv")
+        assert flt.replace(".sbd.csv", "") == sci.replace(".tbd.csv", "")
+
+
+def test_pair_input_files_unpaired_raises(tmp_path) -> None:
+    (tmp_path / "g-001.sbd.csv").write_text("")
+    (tmp_path / "g-002.sbd.csv").write_text("")
+    (tmp_path / "g-001.tbd.csv").write_text("")  # g-002.tbd.csv is missing
+
+    import pytest
+
+    with pytest.raises(ValueError, match="Unpaired"):
+        pl1.pair_input_files(str(tmp_path / "*.sbd.csv"), str(tmp_path / "*.tbd.csv"))
+
+
+def test_pair_input_files_skip_unpaired(tmp_path, caplog) -> None:
+    import logging
+
+    (tmp_path / "g-001.sbd.csv").write_text("")
+    (tmp_path / "g-002.sbd.csv").write_text("")
+    (tmp_path / "g-001.tbd.csv").write_text("")
+
+    with caplog.at_level(logging.WARNING, logger="glide.process_l1"):
+        pairs = pl1.pair_input_files(
+            str(tmp_path / "*.sbd.csv"),
+            str(tmp_path / "*.tbd.csv"),
+            skip_unpaired=True,
+        )
+
+    assert len(pairs) == 1
+    assert pairs[0][0].endswith("g-001.sbd.csv")
+    assert any("Unpaired" in rec.message for rec in caplog.records)
+
+
+def test_pair_input_files_wrong_kind_raises(tmp_path) -> None:
+    """A .tbd file in the flight pattern should error — strict by design."""
+    (tmp_path / "g-001.tbd.csv").write_text("")
+    (tmp_path / "g-001.sbd.csv").write_text("")
+
+    import pytest
+
+    with pytest.raises(ValueError, match="not a flight file"):
+        pl1.pair_input_files(str(tmp_path / "*.tbd.csv"), str(tmp_path / "*.sbd.csv"))
+
+
+def test_pair_input_files_unrecognized_name(tmp_path) -> None:
+    bogus = tmp_path / "not_a_glider_file.txt"
+    bogus.write_text("")
+
+    import pytest
+
+    with pytest.raises(ValueError, match="does not look like"):
+        pl1.pair_input_files(str(bogus), str(bogus))
+
+
+def test_pair_input_files_no_match(tmp_path) -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="No flight files matched"):
+        pl1.pair_input_files(
+            str(tmp_path / "missing*.sbd.csv"), str(tmp_path / "*.tbd.csv")
+        )
+
+
 def test_format_variables() -> None:
     config = load_config()
     sbd = pl1._format_variables(get_test_data("684", "sbd"), config)

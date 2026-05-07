@@ -8,6 +8,7 @@ from pathlib import Path
 
 import netCDF4 as nc
 import typer
+import xarray as xr
 from typing_extensions import Annotated
 
 from . import (
@@ -32,6 +33,19 @@ def version_callback(value: bool):
     if value:
         typer.echo(f"glide version {version('glide')}")
         raise typer.Exit()
+
+
+def _concat_raw(datasets: list[xr.Dataset]) -> xr.Dataset:
+    """Concatenate raw L1 datasets along their index dim.
+
+    parse_l1 returns datasets with an `i` index dim. Single-file calls
+    return the dataset unchanged; multi-file calls stack along `i`.
+    """
+    if len(datasets) == 1:
+        return datasets[0]
+    return xr.concat(
+        datasets, dim="i", data_vars="minimal", coords="minimal", compat="override"
+    )
 
 
 def log_args(func):
@@ -108,8 +122,22 @@ def l1b(
 @app.command()
 @log_args
 def l2(
-    flt_file: Annotated[str, typer.Argument(help="The flight (dbd/sbd) data file.")],
-    sci_file: Annotated[str, typer.Argument(help="The science (ebd/tbd) data file.")],
+    flt_file: Annotated[
+        str,
+        typer.Argument(
+            help="The flight (sbd/dbd) data file or a glob pattern matching "
+            "multiple flight files. Quote the pattern to prevent shell "
+            "expansion (e.g. '*.sbd.csv').",
+        ),
+    ],
+    sci_file: Annotated[
+        str,
+        typer.Argument(
+            help="The science (tbd/ebd) data file or a glob pattern matching "
+            "multiple science files. Each science file must pair with a "
+            "flight file of the same stem.",
+        ),
+    ],
     out_file: _out_file_annotation = "slocum.l2.nc",
     config_file: _config_annotation = None,
     shallowest_profile: Annotated[
@@ -121,6 +149,14 @@ def l2(
             "-d", help="Minimum distance between profiles in number of data points."
         ),
     ] = 20,
+    skip_unpaired: Annotated[
+        bool,
+        typer.Option(
+            "--skip-unpaired",
+            help="If set, drop flight or science files that have no partner "
+            "(matched by basename stem) with a warning instead of failing.",
+        ),
+    ] = False,
     riot_csv: Annotated[
         str | None,
         typer.Option(
@@ -172,10 +208,14 @@ def l2(
     """
     conf = config.load_config(config_file)
 
-    flt_raw = process_l1.parse_l1(flt_file)  # Keep raw for velocity extraction
+    pairs = process_l1.pair_input_files(flt_file, sci_file, skip_unpaired)
+    _log.info("Processing %d flight/science file pair(s)", len(pairs))
+
+    flt_raw = _concat_raw([process_l1.parse_l1(f) for f, _ in pairs])
+    sci_raw = _concat_raw([process_l1.parse_l1(s) for _, s in pairs])
+
     flt = process_l1.format_l1(flt_raw.copy(), conf)
-    sci = process_l1.parse_l1(sci_file)
-    sci = process_l1.format_l1(sci, conf)
+    sci = process_l1.format_l1(sci_raw, conf)
 
     flt = process_l1.apply_qc(flt, conf)
     sci = process_l1.apply_qc(sci, conf)

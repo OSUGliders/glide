@@ -17,7 +17,7 @@ Additionally, we provide the following intermediate processing outputs that may 
 
 ## Real-time workflow note
 
-`glide` is designed to be run on the **full concatenated dataset** for a deployment, not on individual segment files as they arrive. Use `dbd2netcdf` to merge all `*.sbd`/`*.dbd` and `*.tbd`/`*.ebd` files into single concatenated L1 file, then run `glide l2` on those.
+`glide` is designed to be run on the **full concatenated dataset** for a deployment, not on individual segment files as they arrive. You can either pre-merge files with `dbd2netcdf` and pass the resulting single file to `glide l2`, or pass glob patterns directly to `glide l2` and let it concatenate the per-segment L1 files itself (every flight file must have a science file with the same basename stem).
 
 Re-running `glide l2` on real-time data is cheap and idempotent — the recommended pattern is to re-concatenate and re-run after every surfacing. This avoids the gaps that arise when velocity, GPS, or other state is reported only at the next surfacing. It is especially important for DAC submission (`--ioos`), where per-profile files are only emitted once their depth-averaged velocity has been reported.
 
@@ -53,6 +53,14 @@ Assuming that you have already run `dbd2netcdf` over a directory of files (e.g. 
 ```
 glide l2 glidername.sbd.nc glidername.tbd.nc -o glidername.l2.nc -c glidername.config.yml
 ```
+
+The two file arguments also accept shell-style glob patterns, so you can let `glide` concatenate per-segment L1 files for you instead of pre-merging with `dbd2netcdf`:
+
+```
+glide l2 "glidername-*.sbd.nc" "glidername-*.tbd.nc" -o glidername.l2.nc
+```
+
+Quote the patterns to keep the shell from expanding them. Each flight file must have a science file with the same basename stem (e.g. `glider-2025-056-0-27.sbd.nc` pairs with `glider-2025-056-0-27.tbd.nc`); the command aborts on any unpaired file. Pass `--skip-unpaired` to drop unmatched files with a warning instead.
 
 To perform level 3 processing with a specific bin size, use:
 
