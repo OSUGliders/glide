@@ -9,7 +9,7 @@ from pathlib import Path
 import netCDF4 as nc
 import typer
 import xarray as xr
-from typing_extensions import Annotated
+from typing import Annotated
 
 from . import (
     ancillery,
