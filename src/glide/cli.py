@@ -179,8 +179,6 @@ def l2(
 
     out = process_l1.assign_surface_state(out, flt=flt_raw)
 
-    out = process_l1.assign_segment_id(out)
-
     out = process_l1.add_velocity(out, conf, flt=flt_raw)
 
     out = process_l1.add_gps_fixes(out, flt, conf)
@@ -197,7 +195,13 @@ def l2(
 
     if ioos_dir is not None:
         name = glider_name or conf["globals"]["trajectory"]["name"].split("_")[-1]
-        process_l1.emit_ioos_profiles(out, ioos_dir, name, force=force)
+        process_l1.emit_ioos_profiles(
+            out,
+            ioos_dir,
+            name,
+            instruments=conf.get("instruments", {}),
+            force=force,
+        )
 
     if riot_csv:
         from .riot_csv_writer import write_riot_csv

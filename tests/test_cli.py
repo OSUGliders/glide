@@ -58,17 +58,12 @@ def test_l2() -> None:
     assert np.all(np.isfinite(ds.lat_gps.values)), "lat_gps must not contain NaN"
     assert np.all(np.isfinite(ds.lon_gps.values)), "lon_gps must not contain NaN"
 
-    # Contract: profile_id and segment_id are populated on the time dimension
-    # with at least one non-(-1) value (i.e. profiles and segments were found).
+    # Contract: profile_id is populated on the time dimension with at least
+    # one non-(-1) value (i.e. profiles were found). Segment membership is
+    # encoded by shared time_uv values (the canonical NGDAC convention) — no
+    # separate segment_id is needed.
     assert "profile_id" in ds, "profile_id missing from L2 output"
-    assert "segment_id" in ds, "segment_id missing from L2 output"
     assert (ds.profile_id.values >= 0).any(), "Expected at least one profile"
-    assert (ds.segment_id.values >= 0).any(), "Expected at least one segment"
-    # All points belonging to a profile must also belong to a segment.
-    in_profile = ds.profile_id.values >= 0
-    assert (ds.segment_id.values[in_profile] >= 0).all(), (
-        "Every profile point must have a non-(-1) segment_id"
-    )
 
     ds.close()
 
@@ -85,14 +80,14 @@ def test_l2_ioos() -> None:
         glide l2 <sbd> <tbd> -o <merged.nc> --ioos <outdir> -g <glider>
 
     Asserts:
-      * the merged L2 file is still produced (---ioos is additive)
+      * the merged L2 file is still produced (--ioos is additive)
       * at least one per-profile NGDAC file is emitted to outdir
       * each emitted file has scalar u, v, time_uv, lat_uv, lon_uv,
-        profile_id, segment_id (NGDAC v2 contract)
+        profile_id (NGDAC v2 contract)
       * each emitted file omits dive_id, climb_id, state, time_gps, time_uv dim
       * filenames follow the NGDAC convention {glider}_{YYYYMMDDTHHMMSSZ}.nc
-      * each emitted file's (profile_id, segment_id) pair matches what's in
-        the merged L2 file at the same time range
+      * profiles within the same segment share the same time_uv (canonical
+        NGDAC segment grouping)
       * re-running the CLI with the same args adds no new files (idempotency)
     """
     import re
@@ -126,24 +121,12 @@ def test_l2_ioos() -> None:
         merged = xr.open_dataset(merged_file)
         try:
             assert "profile_id" in merged
-            assert "segment_id" in merged
+            merged_time_uv = merged.time_uv.values.copy()
         finally:
             merged.close()
 
         nc_files = sorted(Path(ioos_dir).glob("*.nc"))
         assert len(nc_files) > 0, "Expected at least one IOOS profile file"
-
-        # Cross-check: every (profile_id, segment_id) pair in the IOOS files
-        # must also appear in the merged file's per-time arrays.
-        merged = xr.open_dataset(merged_file)
-        merged_pid = merged.profile_id.values
-        merged_seg = merged.segment_id.values
-        merged.close()
-        merged_pairs = {
-            (int(p), int(s))
-            for p, s in zip(merged_pid, merged_seg)
-            if p >= 0 and s >= 0
-        }
 
         # NGDAC contract checks on every emitted file.
         for nc_file in nc_files:
@@ -152,25 +135,59 @@ def test_l2_ioos() -> None:
             )
             ds = xr.open_dataset(nc_file)
             try:
-                # NGDAC requires u, v, time_uv, lat_uv, lon_uv to be scalar.
-                for v in ("u", "v", "time_uv", "lat_uv", "lon_uv"):
+                # NGDAC requires u, v, time_uv, lat_uv, lon_uv, profile_id,
+                # profile_time, profile_lat, profile_lon to be scalar.
+                scalar_vars = (
+                    "u",
+                    "v",
+                    "time_uv",
+                    "lat_uv",
+                    "lon_uv",
+                    "profile_id",
+                    "profile_time",
+                    "profile_lat",
+                    "profile_lon",
+                    "platform",
+                    "crs",
+                )
+                for v in scalar_vars:
                     assert v in ds, f"{v} missing from {nc_file.name}"
                     assert ds[v].ndim == 0, (
                         f"{v} must be scalar in {nc_file.name}, got dims {ds[v].dims}"
                     )
-                # profile_id and segment_id are scalar identifiers.
-                for v in ("profile_id", "segment_id"):
-                    assert v in ds, f"{v} missing from {nc_file.name}"
-                    assert ds[v].ndim == 0, (
-                        f"{v} must be scalar in {nc_file.name}, got dims {ds[v].dims}"
-                    )
+
+                # platform variable carries the standard NGDAC attributes.
+                assert ds.platform.attrs.get("type") == "platform"
+                assert ds.platform.attrs.get("id") == "osu684"
+                assert "instrument" in ds.platform.attrs
+
+                # crs variable carries WGS84 boilerplate.
+                assert ds.crs.attrs.get("epsg_code") == "EPSG:4326"
+                assert ds.crs.attrs.get("grid_mapping_name") == "latitude_longitude"
+
+                # Configured instruments come through as scalar variables.
+                assert "instrument_ctd" in ds, (
+                    f"instrument_ctd missing from {nc_file.name}"
+                )
+                assert ds.instrument_ctd.ndim == 0
+                assert ds.instrument_ctd.attrs.get("make_model") == "Sea-Bird GPCTD"
+
+                # Profile center variables present (finiteness depends on data
+                # availability — covered by the unit test with synthetic input).
 
                 # Velocity must be finite (this is the emission gate).
                 assert np.isfinite(ds.u.values), f"u is NaN in {nc_file.name}"
                 assert np.isfinite(ds.v.values), f"v is NaN in {nc_file.name}"
 
                 # Variables and dims that don't belong in NGDAC profile files.
-                for v in ("dive_id", "climb_id", "state", "lat_gps", "lon_gps"):
+                for v in (
+                    "dive_id",
+                    "climb_id",
+                    "state",
+                    "lat_gps",
+                    "lon_gps",
+                    "segment_id",
+                ):
                     assert v not in ds, f"{v} should not appear in {nc_file.name}"
                 assert "time_uv" not in ds.dims, (
                     f"time_uv dim should be removed from {nc_file.name}"
@@ -179,12 +196,13 @@ def test_l2_ioos() -> None:
                     f"time_gps dim should be removed from {nc_file.name}"
                 )
 
-                # Cross-check: the (profile_id, segment_id) pair must appear
-                # in the merged file's per-time arrays.
-                pair = (int(ds.profile_id.values), int(ds.segment_id.values))
-                assert pair in merged_pairs, (
-                    f"(profile_id={pair[0]}, segment_id={pair[1]}) from "
-                    f"{nc_file.name} not found in merged L2 file"
+                # The scalar time_uv must match one of the merged file's time_uv
+                # entries — segment membership is encoded by this shared value.
+                # Compare via numpy array equality so this works for both
+                # datetime64 (after CF decode) and float64 representations.
+                t_uv = ds.time_uv.values
+                assert (merged_time_uv == t_uv).any(), (
+                    f"time_uv {t_uv} from {nc_file.name} not found in merged L2"
                 )
             finally:
                 ds.close()

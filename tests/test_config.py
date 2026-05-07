@@ -52,6 +52,19 @@ def test_load_config_merged_variables_present():
     assert "e_2" in conf["merged_variables"]
 
 
+def test_load_config_instruments_present():
+    # Regression: instruments live in the 6th YAML document. If the loader's
+    # positional indexing is off by one, this dict is silently empty.
+    conf = config.load_config()
+    assert "instruments" in conf
+    assert "instrument_ctd" in conf["instruments"], (
+        "instrument_ctd should be loaded from the bundled config.yml"
+    )
+    ctd = conf["instruments"]["instrument_ctd"]
+    assert ctd.get("make_model") == "Sea-Bird GPCTD"
+    assert ctd.get("type") == "instrument"
+
+
 def test_load_config_time_gps_has_anchor():
     # The anchor field drives which time points are kept in add_gps_fixes()
     conf = config.load_config()

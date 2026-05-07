@@ -547,60 +547,6 @@ def test_add_gps_fixes_all_nan() -> None:
     assert "lon_gps" not in result
 
 
-def test_assign_segment_id_basic() -> None:
-    """Each maximal run of state != 0 gets a unique segment_id."""
-    # state pattern: surface, dive, dive, climb, surface, dive, dive, surface
-    # Two underwater segments: indices 1-3 and 5-6
-    state = np.array([0, 1, 1, 2, 0, 1, 1, 0], dtype="i1")
-    ds = xr.Dataset(
-        {"state": ("time", state)},
-        coords={"time": np.arange(len(state), dtype="f8")},
-    )
-
-    result = pl1.assign_segment_id(ds)
-
-    seg = result.segment_id.values
-    assert seg.tolist() == [-1, 1, 1, 1, -1, 2, 2, -1]
-
-
-def test_assign_segment_id_edge_segments() -> None:
-    """Segments at the start or end of the dataset still get an id."""
-    # Dataset starts and ends underwater
-    state = np.array([1, 1, 0, 1, 1, 0, 2, 2], dtype="i1")
-    ds = xr.Dataset(
-        {"state": ("time", state)},
-        coords={"time": np.arange(len(state), dtype="f8")},
-    )
-
-    result = pl1.assign_segment_id(ds)
-
-    seg = result.segment_id.values
-    # Three segments: indices 0-1 (leading), 3-4 (middle), 6-7 (trailing)
-    assert seg.tolist() == [1, 1, -1, 2, 2, -1, 3, 3]
-
-
-def test_assign_segment_id_includes_unknown_state() -> None:
-    """state == -1 (unknown) is treated as underwater for segment grouping."""
-    # state == -1 is "unknown" (between profiles) and is part of a segment
-    state = np.array([0, 1, -1, 2, 0], dtype="i1")
-    ds = xr.Dataset(
-        {"state": ("time", state)},
-        coords={"time": np.arange(len(state), dtype="f8")},
-    )
-
-    result = pl1.assign_segment_id(ds)
-
-    seg = result.segment_id.values
-    assert seg.tolist() == [-1, 1, 1, 1, -1]
-
-
-def test_assign_segment_id_no_state() -> None:
-    """Returns dataset unchanged when state variable is missing."""
-    ds = xr.Dataset(coords={"time": np.arange(3, dtype="f8")})
-    result = pl1.assign_segment_id(ds)
-    assert "segment_id" not in result
-
-
 def test_get_profiles_assigns_profile_id() -> None:
     """profile_id increments by 1 for each descent and each ascent in time order."""
     # Two triangular dives: 0..max..0..max..0. A leading NaN sidesteps a
@@ -643,53 +589,55 @@ def test_get_profiles_assigns_profile_id() -> None:
         assert climb_pids[0] == 2 * k
 
 
-def test_emit_ioos_profiles_writes_scalar_velocity(tmp_path) -> None:
-    """A profile with finite velocity is emitted as an NGDAC-shaped scalar file."""
-    # Build a minimal L2-shaped dataset by hand: 6 time points, one profile,
-    # one segment, one velocity entry on time_uv.
-    time = np.array([0.0, 10.0, 20.0, 30.0, 40.0, 50.0])  # epoch seconds
-    profile_id = np.array([-1, 1, 1, 1, -1, -1], dtype="i4")
-    segment_id = np.array([-1, 1, 1, 1, -1, -1], dtype="i4")
-    state = np.array([0, 1, 1, 2, 0, 0], dtype="i1")
-
-    ds = xr.Dataset(
+def _make_synthetic_l2_ds(
+    *,
+    profile_id: np.ndarray,
+    state: np.ndarray,
+    u: float = 0.12,
+    v: float = -0.05,
+    t_uv: float = 20.0,
+) -> xr.Dataset:
+    """Build a minimal L2-shaped dataset for emit_ioos_profiles tests."""
+    time = np.arange(len(profile_id), dtype="f8") * 10.0
+    n_temp = np.where(profile_id >= 0, np.linspace(12.0, 13.0, len(profile_id)), np.nan)
+    return xr.Dataset(
         {
-            "temperature": (
-                "time",
-                np.array([np.nan, 12.0, 12.5, 13.0, np.nan, np.nan]),
-            ),
+            "temperature": ("time", n_temp),
             "profile_id": ("time", profile_id),
-            "segment_id": ("time", segment_id),
             "state": ("time", state),
-            "dive_id": ("time", np.array([-1, 1, 1, -1, -1, -1], dtype="i4")),
-            "climb_id": ("time", np.array([-1, -1, -1, 1, -1, -1], dtype="i4")),
-            "u": ("time_uv", np.array([0.12])),
-            "v": ("time_uv", np.array([-0.05])),
-            "time_uv": ("time_uv", np.array([20.0])),
+            "dive_id": ("time", np.where(state == 1, 1, -1).astype("i4")),
+            "climb_id": ("time", np.where(state == 2, 1, -1).astype("i4")),
+            "u": ("time_uv", np.array([u])),
+            "v": ("time_uv", np.array([v])),
+            "time_uv": ("time_uv", np.array([t_uv])),
             "lat_uv": ("time_uv", np.array([45.0])),
             "lon_uv": ("time_uv", np.array([-123.0])),
         },
         coords={"time": time},
     )
 
+
+def test_emit_ioos_profiles_writes_scalar_velocity(tmp_path) -> None:
+    """A profile with finite velocity is emitted as an NGDAC-shaped scalar file."""
+    ds = _make_synthetic_l2_ds(
+        profile_id=np.array([-1, 1, 1, 1, -1, -1], dtype="i4"),
+        state=np.array([0, 1, 1, 2, 0, 0], dtype="i1"),
+    )
+
     written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
 
     assert len(written) == 1
-    f = written[0]
-    assert f.exists()
-
-    out = xr.open_dataset(f)
+    out = xr.open_dataset(written[0])
     try:
-        # NGDAC contract: scalar u, v, time_uv, lat_uv, lon_uv, profile_id, segment_id
-        for v in ("u", "v", "time_uv", "lat_uv", "lon_uv", "profile_id", "segment_id"):
+        # NGDAC contract: scalar u, v, time_uv, lat_uv, lon_uv, profile_id
+        for v in ("u", "v", "time_uv", "lat_uv", "lon_uv", "profile_id"):
             assert v in out
             assert out[v].ndim == 0, f"{v} must be scalar"
         assert float(out.u.values) == 0.12
         assert float(out.v.values) == -0.05
         assert int(out.profile_id.values) == 1
-        assert int(out.segment_id.values) == 1
-        # Excluded variables / dims
-        for v in ("dive_id", "climb_id", "state"):
+        # Excluded variables / dims (segment_id no longer emitted)
+        for v in ("dive_id", "climb_id", "state", "segment_id"):
             assert v not in out
         assert "time_uv" not in out.dims
         # Only the in-profile time points are kept
@@ -700,20 +648,12 @@ def test_emit_ioos_profiles_writes_scalar_velocity(tmp_path) -> None:
 
 def test_emit_ioos_profiles_skips_when_velocity_nan(tmp_path) -> None:
     """A profile in a segment with NaN u/v is skipped (no file written)."""
-    time = np.array([0.0, 10.0, 20.0, 30.0])
-    ds = xr.Dataset(
-        {
-            "temperature": ("time", np.array([np.nan, 12.0, 12.5, np.nan])),
-            "profile_id": ("time", np.array([-1, 1, 1, -1], dtype="i4")),
-            "segment_id": ("time", np.array([-1, 1, 1, -1], dtype="i4")),
-            "state": ("time", np.array([0, 1, 2, 0], dtype="i1")),
-            "u": ("time_uv", np.array([np.nan])),
-            "v": ("time_uv", np.array([np.nan])),
-            "time_uv": ("time_uv", np.array([15.0])),
-            "lat_uv": ("time_uv", np.array([np.nan])),
-            "lon_uv": ("time_uv", np.array([np.nan])),
-        },
-        coords={"time": time},
+    ds = _make_synthetic_l2_ds(
+        profile_id=np.array([-1, 1, 1, -1], dtype="i4"),
+        state=np.array([0, 1, 2, 0], dtype="i1"),
+        u=float("nan"),
+        v=float("nan"),
+        t_uv=15.0,
     )
 
     written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
@@ -724,20 +664,12 @@ def test_emit_ioos_profiles_skips_when_velocity_nan(tmp_path) -> None:
 
 def test_emit_ioos_profiles_idempotent(tmp_path) -> None:
     """Re-running with the same data does not write new files."""
-    time = np.array([0.0, 10.0, 20.0, 30.0])
-    ds = xr.Dataset(
-        {
-            "temperature": ("time", np.array([np.nan, 12.0, 12.5, np.nan])),
-            "profile_id": ("time", np.array([-1, 1, 1, -1], dtype="i4")),
-            "segment_id": ("time", np.array([-1, 1, 1, -1], dtype="i4")),
-            "state": ("time", np.array([0, 1, 2, 0], dtype="i1")),
-            "u": ("time_uv", np.array([0.1])),
-            "v": ("time_uv", np.array([0.0])),
-            "time_uv": ("time_uv", np.array([15.0])),
-            "lat_uv": ("time_uv", np.array([45.0])),
-            "lon_uv": ("time_uv", np.array([-123.0])),
-        },
-        coords={"time": time},
+    ds = _make_synthetic_l2_ds(
+        profile_id=np.array([-1, 1, 1, -1], dtype="i4"),
+        state=np.array([0, 1, 2, 0], dtype="i1"),
+        u=0.1,
+        v=0.0,
+        t_uv=15.0,
     )
 
     first = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
@@ -750,3 +682,93 @@ def test_emit_ioos_profiles_idempotent(tmp_path) -> None:
     forced = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider", force=True)
     assert len(forced) == 1
     assert len(list(tmp_path.glob("*.nc"))) == 1
+
+
+def test_emit_ioos_profiles_writes_ngdac_structural_vars(tmp_path) -> None:
+    """platform, crs, profile_time, profile_lat, profile_lon, and configured
+    instrument scalars are all written into each emitted file."""
+    ds = _make_synthetic_l2_ds(
+        profile_id=np.array([-1, 1, 1, 1, -1, -1], dtype="i4"),
+        state=np.array([0, 1, 1, 2, 0, 0], dtype="i1"),
+    )
+    # Add the lat/lon arrays that profile_lat/lon are derived from.
+    ds["lat"] = ("time", np.linspace(45.0, 45.5, ds.sizes["time"]))
+    ds["lon"] = ("time", np.linspace(-123.0, -122.5, ds.sizes["time"]))
+
+    instruments = {
+        "instrument_ctd": {
+            "long_name": "Test CTD",
+            "make_model": "Sea-Bird GPCTD",
+            "serial_number": "9264",
+            "type": "instrument",
+            "platform": "platform",
+        },
+        "instrument_oxygen": {
+            "long_name": "Test Oxygen Sensor",
+            "make_model": "Aanderaa Optode 4831",
+            "serial_number": "416",
+            "type": "instrument",
+            "platform": "platform",
+        },
+    }
+
+    written = pl1.emit_ioos_profiles(
+        ds, tmp_path, "synthglider", instruments=instruments
+    )
+    assert len(written) == 1
+    out = xr.open_dataset(written[0])
+    try:
+        # platform and crs scalars present.
+        assert "platform" in out and out.platform.ndim == 0
+        assert "crs" in out and out.crs.ndim == 0
+        assert out.platform.attrs.get("id") == "synthglider"
+        assert out.platform.attrs.get("type") == "platform"
+        # platform.instrument enumerates the configured instruments.
+        assert "instrument_ctd" in out.platform.attrs.get("instrument", "")
+        assert "instrument_oxygen" in out.platform.attrs.get("instrument", "")
+        # CRS is WGS84 boilerplate.
+        assert out.crs.attrs.get("epsg_code") == "EPSG:4326"
+
+        # Configured instruments emitted as scalars with their attrs.
+        for name, attrs in instruments.items():
+            assert name in out and out[name].ndim == 0
+            for k, v in attrs.items():
+                assert out[name].attrs.get(k) == v, (
+                    f"{name}.{k}: expected {v}, got {out[name].attrs.get(k)}"
+                )
+
+        # Profile-center variables.
+        for v in ("profile_time", "profile_lat", "profile_lon"):
+            assert v in out and out[v].ndim == 0
+        assert np.isfinite(out.profile_lat.values)
+        assert np.isfinite(out.profile_lon.values)
+        # Profile center is the mean of the in-profile lat/lon (indices 1,2,3).
+        expected_lat = float(np.mean(ds.lat.values[1:4]))
+        assert abs(float(out.profile_lat.values) - expected_lat) < 1e-9
+    finally:
+        out.close()
+
+
+def test_emit_ioos_profiles_yo_yo_shares_time_uv(tmp_path) -> None:
+    """Profiles in the same segment share time_uv (canonical NGDAC grouping)."""
+    # surface, dive, climb, dive, climb, surface — 4 profiles in one segment
+    ds = _make_synthetic_l2_ds(
+        profile_id=np.array([-1, 1, 2, 3, 4, -1], dtype="i4"),
+        state=np.array([0, 1, 2, 1, 2, 0], dtype="i1"),
+        u=0.2,
+        v=0.1,
+        t_uv=25.0,
+    )
+
+    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    assert len(written) == 4
+
+    time_uvs = []
+    for f in written:
+        out = xr.open_dataset(f)
+        time_uvs.append(float(out.time_uv.values))
+        out.close()
+
+    # All four profiles share the same scalar time_uv (= the segment's value).
+    assert all(t == time_uvs[0] for t in time_uvs)
+    assert time_uvs[0] == 25.0

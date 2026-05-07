@@ -138,6 +138,7 @@ def load_config(file: str | None = None) -> dict:
     qc_config = docs[2] if len(docs) > 2 else {}
     l1_variables = docs[3] if len(docs) > 3 else {}
     merged_variables = docs[4] if len(docs) > 4 else {}
+    instruments_config = docs[5] if len(docs) > 5 else {}
 
     # Extract include toggles (default to True for backward compatibility)
     include = include_config.get("include", {})
@@ -188,11 +189,19 @@ def load_config(file: str | None = None) -> dict:
         else {}
     )
 
+    # Extract instruments
+    instruments = (
+        instruments_config.get("instruments", {})
+        if isinstance(instruments_config, dict)
+        else {}
+    )
+
     config = dict(
         globals=global_config,
         variables=variables,
         slocum=slocum_name_map,
         merged_variables=merged_vars,
+        instruments=instruments,
         include=dict(
             flight=include_flight,
             thermo=include_thermo,

@@ -428,60 +428,6 @@ def assign_surface_state(
     return ds
 
 
-def assign_segment_id(ds: xr.Dataset) -> xr.Dataset:
-    """Assign a unique segment_id to each contiguous underwater span.
-
-    A segment is a maximal run of `state != 0` (i.e., not surface) — the data
-    collected between two surfacings. All profiles within a segment share the
-    same segment_id, and therefore share the same depth-averaged velocity (u,
-    v) reported at surfacing. Surface points (state == 0) get segment_id = -1.
-
-    Edge segments at the start/end of the dataset (with no bounding surface
-    point on one side) are still assigned an id and are filtered later by the
-    velocity availability gate at IOOS emission time.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Dataset with state variable from get_profiles + assign_surface_state.
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with new segment_id variable on the time dimension.
-    """
-    if "state" not in ds:
-        _log.warning("No state variable in dataset, cannot assign segment_id")
-        return ds
-
-    state = ds.state.values
-    n = len(state)
-    segment_id = np.full(n, -1, dtype="i4")
-
-    if n == 0:
-        ds["segment_id"] = ("time", segment_id, dict(_FillValue=np.int32(-1)))
-        return ds
-
-    not_surface = state != 0
-    # Boundaries: places where not_surface transitions
-    diff = np.diff(not_surface.astype(np.int8))
-    starts = list(np.where(diff == 1)[0] + 1)
-    ends = list(np.where(diff == -1)[0] + 1)
-    # Edge handling: dataset begins or ends underwater
-    if not_surface[0]:
-        starts.insert(0, 0)
-    if not_surface[-1]:
-        ends.append(n)
-
-    for i, (s, e) in enumerate(zip(starts, ends), start=1):
-        segment_id[s:e] = i
-
-    _log.debug("Assigned %d segments", len(starts))
-
-    ds["segment_id"] = ("time", segment_id, dict(_FillValue=np.int32(-1)))
-    return ds
-
-
 def add_velocity(
     ds: xr.Dataset,
     config: dict,
@@ -702,12 +648,63 @@ def add_gps_fixes(ds: xr.Dataset, flt: xr.Dataset, config: dict) -> xr.Dataset:
 _NGDAC_DROP_VARS = ("dive_id", "climb_id", "state")
 _NGDAC_DROP_DIMS = ("time_gps",)
 _NGDAC_SCALAR_FROM_TIME_UV = ("u", "v", "time_uv", "lat_uv", "lon_uv")
+_NGDAC_INT_FILL = np.int32(-2147483647)
+
+_NGDAC_CRS_ATTRS = {
+    "epsg_code": "EPSG:4326",
+    "grid_mapping_name": "latitude_longitude",
+    "inverse_flattening": 298.257223563,
+    "long_name": "http://www.opengis.net/def/crs/EPSG/0/4326",
+    "semi_major_axis": 6378137.0,
+}
+
+_NGDAC_PROFILE_TIME_ATTRS = {
+    "axis": "T",
+    "calendar": "gregorian",
+    "comment": "Timestamp corresponding to the mid-point of the profile",
+    "long_name": "Profile Center Time",
+    "observation_type": "calculated",
+    "platform": "platform",
+    "standard_name": "time",
+    "units": "seconds since 1970-01-01T00:00:00Z",
+}
+
+_NGDAC_PROFILE_LAT_ATTRS = {
+    "axis": "Y",
+    "comment": (
+        "Value is interpolated to provide an estimate of the latitude "
+        "at the mid-point of the profile"
+    ),
+    "long_name": "Profile Center Latitude",
+    "observation_type": "calculated",
+    "platform": "platform",
+    "standard_name": "latitude",
+    "units": "degrees_north",
+    "valid_max": 90.0,
+    "valid_min": -90.0,
+}
+
+_NGDAC_PROFILE_LON_ATTRS = {
+    "axis": "X",
+    "comment": (
+        "Value is interpolated to provide an estimate of the longitude "
+        "at the mid-point of the profile"
+    ),
+    "long_name": "Profile Center Longitude",
+    "observation_type": "calculated",
+    "platform": "platform",
+    "standard_name": "longitude",
+    "units": "degrees_east",
+    "valid_max": 180.0,
+    "valid_min": -180.0,
+}
 
 
 def emit_ioos_profiles(
     ds: xr.Dataset,
     outdir: str | Path,
     glider_name: str,
+    instruments: dict | None = None,
     force: bool = False,
 ) -> list[Path]:
     """Emit one IOOS NGDAC NetCDF file per profile.
@@ -716,8 +713,13 @@ def emit_ioos_profiles(
     one NGDAC-compliant file per profile. Each file:
 
     * contains only points belonging to that profile (one descent OR one ascent);
-    * has scalar ``u``, ``v``, ``time_uv``, ``lat_uv``, ``lon_uv``,
-      ``profile_id``, and ``segment_id`` (no ``time_uv`` dimension);
+    * has scalar ``u``, ``v``, ``time_uv``, ``lat_uv``, ``lon_uv``, and
+      ``profile_id`` (no ``time_uv`` dimension);
+    * has scalar ``profile_time``, ``profile_lat``, ``profile_lon`` at the
+      profile midpoint;
+    * has scalar ``platform`` and ``crs`` variables required by NGDAC v2;
+    * has one scalar ``instrument_<name>`` variable per entry in
+      ``instruments`` carrying its attributes;
     * does not contain ``time_gps``, ``dive_id``, ``climb_id``, or ``state``.
 
     A profile is skipped (and not written) if its containing segment has no
@@ -725,19 +727,30 @@ def emit_ioos_profiles(
     closing surfacing has not yet occurred. The profile will be emitted on a
     future invocation once velocity is reported.
 
+    Profiles within the same surface-to-surface segment share the same
+    ``time_uv``, ``lat_uv``, ``lon_uv``, ``u``, and ``v`` values (the canonical
+    NGDAC way to identify segment membership).
+
     Files that already exist in ``outdir`` are skipped silently unless
     ``force=True``.
 
     Parameters
     ----------
     ds : xr.Dataset
-        L2 dataset containing ``profile_id``, ``segment_id``, and the standard
+        L2 dataset containing ``profile_id``, ``state``, and the standard
         ``time_uv``-dimensioned velocity variables.
     outdir : str or Path
         Directory to write IOOS profile files into. Created if missing.
     glider_name : str
         Glider name, used as the prefix in the IOOS filename
-        ``{glider}_{YYYYMMDDTHHMMSSZ}.nc``.
+        ``{glider}_{YYYYMMDDTHHMMSSZ}.nc``, and as the ``id`` attribute on
+        the ``platform`` variable.
+    instruments : dict, optional
+        Mapping of instrument variable name (e.g. ``"instrument_ctd"``) to a
+        dict of NetCDF attributes (e.g. ``make_model``, ``serial_number``).
+        Each becomes a scalar int variable in every emitted file. The
+        ``platform`` variable's ``instrument`` attribute is auto-populated
+        from these names.
     force : bool, default False
         If True, overwrite existing files instead of skipping them.
 
@@ -749,7 +762,7 @@ def emit_ioos_profiles(
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    for required in ("profile_id", "segment_id"):
+    for required in ("profile_id", "state"):
         if required not in ds:
             _log.warning("No %s in dataset, cannot emit IOOS files", required)
             return []
@@ -764,32 +777,31 @@ def emit_ioos_profiles(
     u_vals = ds.u.values
     v_vals = ds.v.values
     time_vals = ds.time.values
+    state_vals = ds.state.values
     profile_id_vals = ds.profile_id.values
-    segment_id_vals = ds.segment_id.values
+    n = len(state_vals)
 
     written: list[Path] = []
     for pid in profile_ids:
         pid = int(pid)
-        prof_mask = profile_id_vals == pid
-        if not prof_mask.any():
+        prof_indices = np.where(profile_id_vals == pid)[0]
+        if len(prof_indices) == 0:
             continue
 
-        # Identify the segment this profile belongs to.
-        seg_ids_in_prof = np.unique(segment_id_vals[prof_mask])
-        seg_ids_in_prof = seg_ids_in_prof[seg_ids_in_prof >= 0]
-        if len(seg_ids_in_prof) != 1:
-            _log.debug(
-                "Skipping profile_id %d: not in exactly one segment (%s)",
-                pid,
-                seg_ids_in_prof,
-            )
-            continue
-        seg_id = int(seg_ids_in_prof[0])
+        # Walk outward from the profile in state to find the containing segment
+        # boundaries. A segment is bounded on each side by either a surface
+        # point (state == 0) or the edge of the dataset.
+        first_idx = int(prof_indices[0])
+        last_idx = int(prof_indices[-1])
+        left = first_idx
+        while left > 0 and state_vals[left - 1] != 0:
+            left -= 1
+        right = last_idx
+        while right < n - 1 and state_vals[right + 1] != 0:
+            right += 1
 
-        # Find the time_uv entry whose timestamp falls within this segment.
-        seg_mask = segment_id_vals == seg_id
-        seg_time_min = time_vals[seg_mask].min()
-        seg_time_max = time_vals[seg_mask].max()
+        seg_time_min = time_vals[left]
+        seg_time_max = time_vals[right]
         uv_match = (time_uv_vals >= seg_time_min) & (time_uv_vals <= seg_time_max)
         if not uv_match.any():
             _log.debug("Skipping profile_id %d: no matching time_uv entry", pid)
@@ -800,13 +812,13 @@ def emit_ioos_profiles(
         v_val = v_vals[uv_idx]
         if not (np.isfinite(u_val) and np.isfinite(v_val)):
             _log.debug(
-                "Skipping profile_id %d: u/v not finite (segment %d awaiting "
+                "Skipping profile_id %d: u/v not finite (segment awaiting "
                 "closing surfacing)",
                 pid,
-                seg_id,
             )
             continue
 
+        prof_mask = profile_id_vals == pid
         prof_times = time_vals[prof_mask]
         first_time = float(prof_times[0])
         timestamp = datetime.fromtimestamp(first_time, tz=timezone.utc).strftime(
@@ -818,14 +830,14 @@ def emit_ioos_profiles(
             _log.debug("Skipping profile_id %d: %s already exists", pid, out_path.name)
             continue
 
-        prof_ds = _slice_profile(ds, prof_mask, uv_idx, pid, seg_id)
+        prof_ds = _slice_profile(ds, prof_mask, uv_idx, pid)
+        prof_ds = _add_ngdac_structural_vars(prof_ds, glider_name, instruments)
         prof_ds.to_netcdf(out_path)
         written.append(out_path)
         _log.info(
-            "Wrote %s (profile_id=%d, segment_id=%d, %d points)",
+            "Wrote %s (profile_id=%d, %d points)",
             out_path.name,
             pid,
-            seg_id,
             int(prof_mask.sum()),
         )
 
@@ -838,14 +850,13 @@ def _slice_profile(
     prof_mask: np.ndarray,
     uv_idx: int,
     profile_id: int,
-    segment_id: int,
 ) -> xr.Dataset:
     """Build a per-profile NGDAC-shaped dataset.
 
     Selects the profile's time points, reduces ``time_uv``-dimensioned
-    variables to scalars at ``uv_idx``, sets scalar ``profile_id`` and
-    ``segment_id``, and drops variables that don't belong in NGDAC profile
-    files (dive_id, climb_id, state, time_gps and its companions).
+    variables to scalars at ``uv_idx``, sets scalar ``profile_id``, and drops
+    variables that don't belong in NGDAC profile files (dive_id, climb_id,
+    state, time_gps and its companions).
     """
     # Capture scalar values from the source dataset before slicing/dropping.
     scalar_values = {}
@@ -853,9 +864,7 @@ def _slice_profile(
         if v in ds:
             scalar_values[v] = (ds[v].values[uv_idx], dict(ds[v].attrs))
 
-    # Capture profile_id / segment_id attrs from the source (per-time arrays).
     pid_attrs = dict(ds["profile_id"].attrs) if "profile_id" in ds else {}
-    seg_attrs = dict(ds["segment_id"].attrs) if "segment_id" in ds else {}
 
     prof_indices = np.where(prof_mask)[0]
     prof_ds = ds.isel(time=prof_indices)
@@ -868,12 +877,9 @@ def _slice_profile(
     for v, (val, attrs) in scalar_values.items():
         prof_ds[v] = ((), val, attrs)
 
-    # Replace per-time profile_id/segment_id arrays with scalars.
-    for v in ("profile_id", "segment_id"):
-        if v in prof_ds:
-            prof_ds = prof_ds.drop_vars(v)
+    if "profile_id" in prof_ds:
+        prof_ds = prof_ds.drop_vars("profile_id")
     prof_ds["profile_id"] = ((), np.int32(profile_id), pid_attrs)
-    prof_ds["segment_id"] = ((), np.int32(segment_id), seg_attrs)
 
     # Drop dims and variables that don't belong in NGDAC profile files.
     for dim in _NGDAC_DROP_DIMS:
@@ -883,6 +889,67 @@ def _slice_profile(
     for v in _NGDAC_DROP_VARS:
         if v in prof_ds:
             prof_ds = prof_ds.drop_vars(v)
+
+    return prof_ds
+
+
+def _add_ngdac_structural_vars(
+    prof_ds: xr.Dataset,
+    glider_name: str,
+    instruments: dict | None,
+) -> xr.Dataset:
+    """Add NGDAC v2 structural scalar variables to a per-profile dataset.
+
+    Adds platform, crs, profile_time, profile_lat, profile_lon, and one
+    instrument_<name> scalar per entry in ``instruments``.
+    """
+    instruments = instruments or {}
+
+    # Profile center: midpoint time, with lat/lon evaluated as the mean of
+    # the (already interpolated) per-time arrays. NaN-safe.
+    time_vals = prof_ds.time.values
+    if np.issubdtype(time_vals.dtype, np.datetime64):
+        # Convert to seconds since epoch for arithmetic, then back.
+        epoch_sec = time_vals.astype("datetime64[ns]").astype("int64") / 1e9
+        profile_time = float(np.nanmean(epoch_sec))
+    else:
+        profile_time = float(np.nanmean(time_vals.astype("f8")))
+
+    if "lat" in prof_ds:
+        profile_lat = float(np.nanmean(prof_ds.lat.values.astype("f8")))
+    else:
+        profile_lat = float("nan")
+    if "lon" in prof_ds:
+        profile_lon = float(np.nanmean(prof_ds.lon.values.astype("f8")))
+    else:
+        profile_lon = float("nan")
+
+    prof_ds["profile_time"] = ((), profile_time, dict(_NGDAC_PROFILE_TIME_ATTRS))
+    prof_ds["profile_lat"] = ((), profile_lat, dict(_NGDAC_PROFILE_LAT_ATTRS))
+    prof_ds["profile_lon"] = ((), profile_lon, dict(_NGDAC_PROFILE_LON_ATTRS))
+
+    # platform variable. NGDAC requires this; its `instrument` attribute lists
+    # the instrument variables present in the file.
+    instrument_list = ", ".join(instruments.keys()) if instruments else " "
+    platform_attrs = {
+        "_FillValue": _NGDAC_INT_FILL,
+        "ancillary_variables": " ",
+        "comment": "Autonomous vehicle",
+        "id": glider_name,
+        "instrument": instrument_list,
+        "long_name": "platform",
+        "type": "platform",
+    }
+    prof_ds["platform"] = ((), np.int32(0), platform_attrs)
+
+    # CRS variable (boilerplate WGS84).
+    crs_attrs = {"_FillValue": _NGDAC_INT_FILL, **_NGDAC_CRS_ATTRS}
+    prof_ds["crs"] = ((), np.int32(0), crs_attrs)
+
+    # One scalar per configured instrument.
+    for name, attrs in instruments.items():
+        full_attrs = {"_FillValue": _NGDAC_INT_FILL, **attrs}
+        prof_ds[name] = ((), np.int32(0), full_attrs)
 
     return prof_ds
 

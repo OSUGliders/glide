@@ -107,3 +107,30 @@ merged_variables:
       valid_max: 0.001
       instrument: instrument_microrider
       observation_type: calculated
+
+--- ### INSTRUMENTS
+
+# Instruments mounted on the glider. Each entry under `instruments:` becomes a
+# scalar int variable in IOOS NGDAC profile files (variable name = the key).
+# All key/value pairs under an instrument become NetCDF attributes on that
+# variable. Required attributes per the NGDAC convention: long_name,
+# make_model, serial_number, type, platform. Recommended: calibration_date,
+# factory_calibrated, calibration_directory_url, calibration_report. Any
+# additional keys are written verbatim.
+#
+# CTD variables (temperature, conductivity, etc.) in core.yml already declare
+# `instrument: instrument_ctd`; that attribute will resolve to the matching
+# variable defined here.
+
+instruments:
+  instrument_ctd:
+    long_name: Slocum Glider CTD
+    make_model: Sea-Bird GPCTD
+    serial_number: ""  # set per deployment
+    type: instrument
+    platform: platform
+    comment: pumped CTD
+    calibration_date: ""  # ISO 8601, e.g. "2024-01-15T00:00:00Z"
+    factory_calibrated: ""
+    calibration_directory_url: ""
+    calibration_report: ""
