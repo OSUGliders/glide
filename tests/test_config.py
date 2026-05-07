@@ -50,6 +50,13 @@ def test_load_config_time_gps_has_anchor():
     assert "lon_gps" in anchor
 
 
+def test_load_config_has_ngdac_config():
+    conf = config.load_config()
+    assert "ngdac" in conf
+    assert "crs" in conf["ngdac"]
+    assert "CF" in conf["ngdac"]["crs"]
+
+
 def test_load_config_time_valid_min_max_are_floats():
     # Datetime strings in core.yml must be converted to UTC timestamps
     conf = config.load_config()

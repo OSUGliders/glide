@@ -474,3 +474,55 @@ N2:
     standard_name: square_of_brunt_vaisala_frequency_in_sea_water
     units: s-2
     observation_type: calculated
+
+--- ### NGDAC STRUCTURAL CONFIG
+
+crs:
+  CF:
+    epsg_code: EPSG:4326
+    grid_mapping_name: latitude_longitude
+    inverse_flattening: 298.257223563
+    long_name: http://www.opengis.net/def/crs/EPSG/0/4326
+    semi_major_axis: 6378137.0
+
+profile_time:
+  CF:
+    axis: T
+    calendar: gregorian
+    comment: Timestamp corresponding to the mid-point of the profile
+    long_name: Profile Center Time
+    observation_type: calculated
+    platform: platform
+    standard_name: time
+    units: seconds since 1970-01-01T00:00:00Z
+
+profile_lat:
+  CF:
+    axis: Y
+    comment: Value is interpolated to provide an estimate of the latitude at the mid-point of the profile
+    long_name: Profile Center Latitude
+    observation_type: calculated
+    platform: platform
+    standard_name: latitude
+    units: degrees_north
+    valid_max: 90.0
+    valid_min: -90.0
+
+profile_lon:
+  CF:
+    axis: X
+    comment: Value is interpolated to provide an estimate of the longitude at the mid-point of the profile
+    long_name: Profile Center Longitude
+    observation_type: calculated
+    platform: platform
+    standard_name: longitude
+    units: degrees_east
+    valid_max: 180.0
+    valid_min: -180.0
+
+platform:
+  CF:
+    ancillary_variables: " "
+    comment: Autonomous vehicle
+    long_name: platform
+    type: platform

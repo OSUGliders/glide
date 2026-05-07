@@ -4,7 +4,9 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+import glide.gliderdac as gd
 import glide.process_l1 as pl1
+import glide.profiles as prof
 import glide.qc as qc
 from glide.config import load_config
 
@@ -228,7 +230,7 @@ def test_assign_surface_state() -> None:
     )
 
     # Apply surface state assignment
-    result = pl1.assign_surface_state(ds, flt, dt=15.0)
+    result = prof.assign_surface_state(ds, flt, dt=15.0)
 
     # Check that unknown states near GPS fixes are now surface (0)
     assert result.state.values[5] == 0, "Point at GPS fix should be surface"
@@ -257,7 +259,7 @@ def test_assign_surface_state_no_flight_data() -> None:
     )
 
     # No flight data - should return unchanged
-    result = pl1.assign_surface_state(ds, flt=None)
+    result = prof.assign_surface_state(ds, flt=None)
     assert np.array_equal(result.state.values, state)
 
 
@@ -308,7 +310,7 @@ def test_add_velocity_groups_by_velocity_reports() -> None:
         },
     )
 
-    result = pl1.add_velocity(ds, config, flt=flt)
+    result = prof.add_velocity(ds, config, flt=flt)
 
     # Velocity at t=55 should capture cycle 1 (profiles 10-50)
     # Velocity at t=98 should capture cycle 2 (profiles 60-95)
@@ -372,11 +374,11 @@ def test_realtime_velocity_processing() -> None:
         merged = pl1.calculate_thermodynamics(merged, config)
 
         # Get profiles
-        out = pl1.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
+        out = prof.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
 
         # Assign surface state and add velocity
-        out = pl1.assign_surface_state(out, flt=flt_raw)
-        out = pl1.add_velocity(out, config, flt=flt_raw)
+        out = prof.assign_surface_state(out, flt=flt_raw)
+        out = prof.add_velocity(out, config, flt=flt_raw)
 
         results.append(
             {
@@ -459,14 +461,14 @@ def test_realtime_velocity_merged() -> None:
     merged = pl1.calculate_thermodynamics(merged, config)
 
     # Get profiles
-    out = pl1.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
+    out = prof.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
 
     # Check that we detected some profiles
     n_dives = (out.dive_id.values >= 0).sum()
 
     # Assign surface state and add velocity
-    out = pl1.assign_surface_state(out, flt=flt_raw)
-    out = pl1.add_velocity(out, config, flt=flt_raw)
+    out = prof.assign_surface_state(out, flt=flt_raw)
+    out = prof.add_velocity(out, config, flt=flt_raw)
 
     # Should have velocity variables
     assert "time_uv" in out, "Missing time_uv"
@@ -499,7 +501,7 @@ def test_add_gps_fixes_creates_gps_dimension() -> None:
     )
     ds = xr.Dataset(coords={"time": time_vals})
 
-    result = pl1.add_gps_fixes(ds, flt, config)
+    result = prof.add_gps_fixes(ds, flt, config)
 
     assert "time_gps" in result.dims, "time_gps dimension missing"
     assert "lat_gps" in result, "lat_gps missing"
@@ -519,7 +521,7 @@ def test_add_gps_fixes_no_gps_variables() -> None:
     flt = xr.Dataset(coords={"time": np.arange(5, dtype="f8")})
     ds = xr.Dataset(coords={"time": np.arange(5, dtype="f8")})
 
-    result = pl1.add_gps_fixes(ds, flt, config)
+    result = prof.add_gps_fixes(ds, flt, config)
 
     assert "time_gps" not in result.dims
     assert "lat_gps" not in result
@@ -540,7 +542,7 @@ def test_add_gps_fixes_all_nan() -> None:
     )
     ds = xr.Dataset(coords={"time": np.arange(n, dtype="f8")})
 
-    result = pl1.add_gps_fixes(ds, flt, config)
+    result = prof.add_gps_fixes(ds, flt, config)
 
     assert "time_gps" not in result.dims
     assert "lat_gps" not in result
@@ -566,7 +568,7 @@ def test_get_profiles_assigns_profile_id() -> None:
         coords={"time": time},
     )
 
-    result = pl1.get_profiles(ds, shallowest_profile=5.0, profile_distance=10)
+    result = prof.get_profiles(ds, shallowest_profile=5.0, profile_distance=10)
 
     assert "profile_id" in result
     pid = result.profile_id.values
@@ -619,12 +621,13 @@ def _make_synthetic_l2_ds(
 
 def test_emit_ioos_profiles_writes_scalar_velocity(tmp_path) -> None:
     """A profile with finite velocity is emitted as an NGDAC-shaped scalar file."""
+    config = load_config()
     ds = _make_synthetic_l2_ds(
         profile_id=np.array([-1, 1, 1, 1, -1, -1], dtype="i4"),
         state=np.array([0, 1, 1, 2, 0, 0], dtype="i1"),
     )
 
-    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    written = gd.emit_ioos_profiles(ds, tmp_path, "test_glider", ngdac=config["ngdac"])
 
     assert len(written) == 1
     out = xr.open_dataset(written[0])
@@ -648,6 +651,7 @@ def test_emit_ioos_profiles_writes_scalar_velocity(tmp_path) -> None:
 
 def test_emit_ioos_profiles_skips_when_velocity_nan(tmp_path) -> None:
     """A profile in a segment with NaN u/v is skipped (no file written)."""
+    config = load_config()
     ds = _make_synthetic_l2_ds(
         profile_id=np.array([-1, 1, 1, -1], dtype="i4"),
         state=np.array([0, 1, 2, 0], dtype="i1"),
@@ -656,7 +660,7 @@ def test_emit_ioos_profiles_skips_when_velocity_nan(tmp_path) -> None:
         t_uv=15.0,
     )
 
-    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    written = gd.emit_ioos_profiles(ds, tmp_path, "test_glider", ngdac=config["ngdac"])
 
     assert written == []
     assert list(tmp_path.glob("*.nc")) == []
@@ -664,6 +668,7 @@ def test_emit_ioos_profiles_skips_when_velocity_nan(tmp_path) -> None:
 
 def test_emit_ioos_profiles_idempotent(tmp_path) -> None:
     """Re-running with the same data does not write new files."""
+    config = load_config()
     ds = _make_synthetic_l2_ds(
         profile_id=np.array([-1, 1, 1, -1], dtype="i4"),
         state=np.array([0, 1, 2, 0], dtype="i1"),
@@ -672,14 +677,16 @@ def test_emit_ioos_profiles_idempotent(tmp_path) -> None:
         t_uv=15.0,
     )
 
-    first = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    first = gd.emit_ioos_profiles(ds, tmp_path, "test_glider", ngdac=config["ngdac"])
     assert len(first) == 1
 
-    second = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    second = gd.emit_ioos_profiles(ds, tmp_path, "test_glider", ngdac=config["ngdac"])
     assert second == []
     assert len(list(tmp_path.glob("*.nc"))) == 1
 
-    forced = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider", force=True)
+    forced = gd.emit_ioos_profiles(
+        ds, tmp_path, "test_glider", force=True, ngdac=config["ngdac"]
+    )
     assert len(forced) == 1
     assert len(list(tmp_path.glob("*.nc"))) == 1
 
@@ -687,6 +694,7 @@ def test_emit_ioos_profiles_idempotent(tmp_path) -> None:
 def test_emit_ioos_profiles_writes_ngdac_structural_vars(tmp_path) -> None:
     """platform, crs, profile_time, profile_lat, profile_lon, and configured
     instrument scalars are all written into each emitted file."""
+    config = load_config()
     ds = _make_synthetic_l2_ds(
         profile_id=np.array([-1, 1, 1, 1, -1, -1], dtype="i4"),
         state=np.array([0, 1, 1, 2, 0, 0], dtype="i1"),
@@ -712,8 +720,12 @@ def test_emit_ioos_profiles_writes_ngdac_structural_vars(tmp_path) -> None:
         },
     }
 
-    written = pl1.emit_ioos_profiles(
-        ds, tmp_path, "synthglider", instruments=instruments
+    written = gd.emit_ioos_profiles(
+        ds,
+        tmp_path,
+        "synthglider",
+        instruments=instruments,
+        ngdac=config["ngdac"],
     )
     assert len(written) == 1
     out = xr.open_dataset(written[0])
@@ -751,6 +763,7 @@ def test_emit_ioos_profiles_writes_ngdac_structural_vars(tmp_path) -> None:
 
 def test_emit_ioos_profiles_yo_yo_shares_time_uv(tmp_path) -> None:
     """Profiles in the same segment share time_uv (canonical NGDAC grouping)."""
+    config = load_config()
     # surface, dive, climb, dive, climb, surface — 4 profiles in one segment
     ds = _make_synthetic_l2_ds(
         profile_id=np.array([-1, 1, 2, 3, 4, -1], dtype="i4"),
@@ -760,7 +773,7 @@ def test_emit_ioos_profiles_yo_yo_shares_time_uv(tmp_path) -> None:
         t_uv=25.0,
     )
 
-    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    written = gd.emit_ioos_profiles(ds, tmp_path, "test_glider", ngdac=config["ngdac"])
     assert len(written) == 4
 
     time_uvs = []

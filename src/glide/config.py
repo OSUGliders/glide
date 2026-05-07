@@ -39,7 +39,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def _load_core() -> tuple[dict, dict, dict]:
+def _load_core() -> tuple[dict, dict, dict, dict]:
     """Load core variable definitions from bundled core.yml.
 
     Returns
@@ -50,6 +50,8 @@ def _load_core() -> tuple[dict, dict, dict]:
         Optional flight attitude variables (heading, pitch, roll).
     derived_thermo : dict
         Optional derived thermodynamic variables.
+    ngdac : dict
+        IOOS NGDAC structural configuration.
     """
     from importlib import resources
 
@@ -58,17 +60,18 @@ def _load_core() -> tuple[dict, dict, dict]:
     with open(core_file) as f:
         docs = [doc for doc in safe_load_all(f)]
 
-    if len(docs) != 3:
+    if len(docs) != 4:
         raise ValueError(
-            f"Expected core.yml to contain exactly 3 YAML documents (core, "
-            f"flight_attitude, derived_thermo), but found {len(docs)}."
+            f"Expected core.yml to contain exactly 4 YAML documents (core, "
+            f"flight_attitude, derived_thermo, ngdac), but found {len(docs)}."
         )
 
     core = docs[0]
     flight = docs[1]
     thermo = docs[2]
+    ngdac = docs[3]
 
-    return core, flight, thermo
+    return core, flight, thermo, ngdac
 
 
 def _apply_qc_overrides(variables: dict, qc_overrides: dict) -> dict:
@@ -175,9 +178,10 @@ def load_config(file: str | None = None) -> dict:
         - merged_variables: variables for higher-level processing
         - instruments: per-deployment instrument metadata
         - include: which optional suites are enabled
+        - ngdac: IOOS NGDAC structural metadata
     """
     # Load core definitions
-    core, flight, thermo = _load_core()
+    core, flight, thermo, ngdac = _load_core()
 
     # Load user config
     if file is None:
@@ -249,6 +253,7 @@ def load_config(file: str | None = None) -> dict:
         slocum=slocum_name_map,
         merged_variables=merged_vars,
         instruments=instruments,
+        ngdac=ngdac,
         include=dict(
             flight=include_flight,
             thermo=include_thermo,
