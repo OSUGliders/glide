@@ -71,14 +71,6 @@ def _load_core() -> tuple[dict, dict, dict, dict]:
     thermo = docs[2]
     ngdac = docs[3]
 
-    if not isinstance(ngdac, dict):
-        raise ValueError(
-            f"Expected NGDAC document in core.yml to be a mapping, got {type(ngdac).__name__}."
-        )
-
-    if "ngdac" in ngdac and isinstance(ngdac["ngdac"], dict):
-        ngdac = ngdac["ngdac"]
-
     return core, flight, thermo, ngdac
 
 
