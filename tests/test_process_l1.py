@@ -6,6 +6,7 @@ import xarray as xr
 
 import glide.gliderdac as gd
 import glide.process_l1 as pl1
+import glide.profiles as prof
 import glide.qc as qc
 from glide.config import load_config
 
@@ -229,7 +230,7 @@ def test_assign_surface_state() -> None:
     )
 
     # Apply surface state assignment
-    result = pl1.assign_surface_state(ds, flt, dt=15.0)
+    result = prof.assign_surface_state(ds, flt, dt=15.0)
 
     # Check that unknown states near GPS fixes are now surface (0)
     assert result.state.values[5] == 0, "Point at GPS fix should be surface"
@@ -258,7 +259,7 @@ def test_assign_surface_state_no_flight_data() -> None:
     )
 
     # No flight data - should return unchanged
-    result = pl1.assign_surface_state(ds, flt=None)
+    result = prof.assign_surface_state(ds, flt=None)
     assert np.array_equal(result.state.values, state)
 
 
@@ -309,7 +310,7 @@ def test_add_velocity_groups_by_velocity_reports() -> None:
         },
     )
 
-    result = pl1.add_velocity(ds, config, flt=flt)
+    result = prof.add_velocity(ds, config, flt=flt)
 
     # Velocity at t=55 should capture cycle 1 (profiles 10-50)
     # Velocity at t=98 should capture cycle 2 (profiles 60-95)
@@ -373,11 +374,11 @@ def test_realtime_velocity_processing() -> None:
         merged = pl1.calculate_thermodynamics(merged, config)
 
         # Get profiles
-        out = pl1.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
+        out = prof.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
 
         # Assign surface state and add velocity
-        out = pl1.assign_surface_state(out, flt=flt_raw)
-        out = pl1.add_velocity(out, config, flt=flt_raw)
+        out = prof.assign_surface_state(out, flt=flt_raw)
+        out = prof.add_velocity(out, config, flt=flt_raw)
 
         results.append(
             {
@@ -460,14 +461,14 @@ def test_realtime_velocity_merged() -> None:
     merged = pl1.calculate_thermodynamics(merged, config)
 
     # Get profiles
-    out = pl1.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
+    out = prof.get_profiles(merged, shallowest_profile=5.0, profile_distance=10)
 
     # Check that we detected some profiles
     n_dives = (out.dive_id.values >= 0).sum()
 
     # Assign surface state and add velocity
-    out = pl1.assign_surface_state(out, flt=flt_raw)
-    out = pl1.add_velocity(out, config, flt=flt_raw)
+    out = prof.assign_surface_state(out, flt=flt_raw)
+    out = prof.add_velocity(out, config, flt=flt_raw)
 
     # Should have velocity variables
     assert "time_uv" in out, "Missing time_uv"
@@ -500,7 +501,7 @@ def test_add_gps_fixes_creates_gps_dimension() -> None:
     )
     ds = xr.Dataset(coords={"time": time_vals})
 
-    result = pl1.add_gps_fixes(ds, flt, config)
+    result = prof.add_gps_fixes(ds, flt, config)
 
     assert "time_gps" in result.dims, "time_gps dimension missing"
     assert "lat_gps" in result, "lat_gps missing"
@@ -520,7 +521,7 @@ def test_add_gps_fixes_no_gps_variables() -> None:
     flt = xr.Dataset(coords={"time": np.arange(5, dtype="f8")})
     ds = xr.Dataset(coords={"time": np.arange(5, dtype="f8")})
 
-    result = pl1.add_gps_fixes(ds, flt, config)
+    result = prof.add_gps_fixes(ds, flt, config)
 
     assert "time_gps" not in result.dims
     assert "lat_gps" not in result
@@ -541,7 +542,7 @@ def test_add_gps_fixes_all_nan() -> None:
     )
     ds = xr.Dataset(coords={"time": np.arange(n, dtype="f8")})
 
-    result = pl1.add_gps_fixes(ds, flt, config)
+    result = prof.add_gps_fixes(ds, flt, config)
 
     assert "time_gps" not in result.dims
     assert "lat_gps" not in result
@@ -567,7 +568,7 @@ def test_get_profiles_assigns_profile_id() -> None:
         coords={"time": time},
     )
 
-    result = pl1.get_profiles(ds, shallowest_profile=5.0, profile_distance=10)
+    result = prof.get_profiles(ds, shallowest_profile=5.0, profile_distance=10)
 
     assert "profile_id" in result
     pid = result.profile_id.values

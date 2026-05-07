@@ -10,7 +10,16 @@ import netCDF4 as nc
 import typer
 from typing_extensions import Annotated
 
-from . import ancillery, config, gliderdac, hotel, process_l1, process_l2, process_l3
+from . import (
+    ancillery,
+    config,
+    gliderdac,
+    hotel,
+    process_l1,
+    process_l2,
+    process_l3,
+    profiles,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -175,13 +184,13 @@ def l2(
 
     merged = process_l1.calculate_thermodynamics(merged, conf)
 
-    out = process_l1.get_profiles(merged, shallowest_profile, profile_distance)
+    out = profiles.get_profiles(merged, shallowest_profile, profile_distance)
 
-    out = process_l1.assign_surface_state(out, flt=flt_raw)
+    out = profiles.assign_surface_state(out, flt=flt_raw)
 
-    out = process_l1.add_velocity(out, conf, flt=flt_raw)
+    out = profiles.add_velocity(out, conf, flt=flt_raw)
 
-    out = process_l1.add_gps_fixes(out, flt, conf)
+    out = profiles.add_gps_fixes(out, flt, conf)
 
     out = process_l1.enforce_types(out, conf)
 
