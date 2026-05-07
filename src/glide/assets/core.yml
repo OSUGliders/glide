@@ -281,13 +281,19 @@ dive_id:
   dtype: i4
   CF:
     long_name: Dive ID
-    comment: "Unique identifier for each dive profile, starting from 0. -1 indicates no dive."
+    comment: "Unique identifier for each dive profile, starting from 1. -1 indicates no dive."
 
 climb_id:
   dtype: i4
   CF:
     long_name: Climb ID
-    comment: "Unique identifier for each climb profile, starting from 0. -1 indicates no climb."
+    comment: "Unique identifier for each climb profile, starting from 1. -1 indicates no climb."
+
+profile_id:
+  dtype: i4
+  CF:
+    long_name: Profile ID
+    comment: "Unique identifier for each profile (one descent or one ascent), starting from 1 in time order. -1 indicates no profile. Reduced to a scalar in IOOS NGDAC profile files. Profiles sharing a surface-to-surface segment can be identified by sharing the same time_uv value."
 
 state:
   dtype: i1

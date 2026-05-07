@@ -3,7 +3,6 @@
 import functools
 import inspect
 import logging
-from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
 
@@ -40,13 +39,6 @@ def log_args(func):
         return func(*args, **kwargs)
 
     return wrapper
-
-
-def generate_ioos_filename(ds, glider_name: str) -> str:
-    first_time = float(ds["time"].values[0])
-    dt = datetime.fromtimestamp(first_time, tz=timezone.utc)
-    timestamp = dt.strftime("%Y%m%dT%H%M%SZ")
-    return f"{glider_name}_{timestamp}.nc"
 
 
 # Commonly used argument annotations
@@ -142,9 +134,29 @@ def l2(
         typer.Option(
             "--glider",
             "-g",
-            help="Glider name for IOOS-style filename when output is a directory.",
+            help="Glider name used as the prefix in IOOS profile filenames. "
+            "Defaults to the trailing component of the trajectory name in the "
+            "config.",
         ),
     ] = None,
+    ioos_dir: Annotated[
+        str | None,
+        typer.Option(
+            "--ioos",
+            help="If set, additionally emit one IOOS NGDAC NetCDF file per "
+            "profile into this directory. Profiles whose containing segment "
+            "has no finite velocity (i.e. trailing dives without a closing "
+            "surfacing) are skipped and will be emitted on a future run.",
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="When emitting IOOS profile files, overwrite existing files "
+            "instead of skipping them.",
+        ),
+    ] = False,
 ) -> None:
     """
     Generate L2 data from L1 data.
@@ -179,12 +191,17 @@ def l2(
 
     out.encoding["unlimited_dims"] = {}
 
-    out_path = Path(out_file)
-    if out_path.is_dir():
-        name = glider_name or conf["globals"]["trajectory"]["name"].split("_")[-1]
-        out_path = out_path / generate_ioos_filename(out, name)
+    out.to_netcdf(out_file)
 
-    out.to_netcdf(out_path)
+    if ioos_dir is not None:
+        name = glider_name or conf["globals"]["trajectory"]["name"].split("_")[-1]
+        process_l1.emit_ioos_profiles(
+            out,
+            ioos_dir,
+            name,
+            instruments=conf.get("instruments", {}),
+            force=force,
+        )
 
     if riot_csv:
         from .riot_csv_writer import write_riot_csv
@@ -360,130 +377,6 @@ def concat(
     ds = ancillery.concat(files, concat_dim=concat_dim)
 
     ds.to_netcdf(out_file)
-
-
-@app.command()
-@log_args
-def backfill(
-    l2_files: Annotated[
-        list[str], typer.Argument(help="L2 files to check for missing velocity.")
-    ],
-    raw_dir: Annotated[
-        str,
-        typer.Option("-r", "--raw-dir", help="Directory containing raw sbd/dbd files."),
-    ],
-    extra_files: Annotated[
-        int,
-        typer.Option(
-            "-n",
-            "--extra",
-            help="Number of extra raw files to load after last L2 file.",
-        ),
-    ] = 3,
-) -> None:
-    """
-    Backfill depth-averaged velocity to L2 files.
-
-    Uses the glider state variable in L2 files to identify dive cycles, then
-    looks up velocity from the corresponding raw flight files. Updates velocity
-    if missing or if the new estimate differs significantly from the existing one.
-
-    File naming convention: L2 files should be named like 'basename.l2.nc'
-    where 'basename.sbd.nc' or 'basename.dbd.nc' is the corresponding raw file.
-    """
-    raw_path = Path(raw_dir)
-
-    # Sort L2 files by name to ensure chronological order
-    l2_files_sorted = sorted([Path(f) for f in l2_files])
-
-    # Filter to files that have velocity variables
-    files_to_update = []
-    for l2_file in l2_files_sorted:
-        try:
-            with nc.Dataset(str(l2_file), "r") as ds:
-                if "time_uv" in ds.variables:
-                    files_to_update.append(l2_file)
-        except Exception as e:
-            _log.warning("Could not read %s: %s", l2_file, e)
-            continue
-
-    if not files_to_update:
-        typer.echo("No L2 files with time_uv variable found.")
-        return
-
-    typer.echo(f"Processing {len(files_to_update)} L2 files.")
-
-    # Extract base names from L2 files (remove .l2.nc suffix)
-    def get_base_name(l2_file: Path) -> str:
-        name = l2_file.name
-        for suffix in [".l2.nc", ".L2.nc", ".nc"]:
-            if name.endswith(suffix):
-                return name[: -len(suffix)]
-        return name.rsplit(".", 1)[0]
-
-    first_base = get_base_name(files_to_update[0])
-    last_base = get_base_name(files_to_update[-1])
-
-    # Get all sbd/dbd files in raw directory, sorted
-    # Look for .sbd.nc, .sbd.csv, .dbd.nc, .dbd.csv patterns
-    raw_files = sorted(
-        list(raw_path.glob("*.sbd.nc"))
-        + list(raw_path.glob("*.sbd.csv"))
-        + list(raw_path.glob("*.dbd.nc"))
-        + list(raw_path.glob("*.dbd.csv"))
-    )
-
-    if not raw_files:
-        typer.echo(f"No raw flight files found in {raw_dir}")
-        return
-
-    # Extract base names from raw files (remove .sbd.nc, .sbd.csv, etc.)
-    def get_raw_base_name(raw_file: Path) -> str:
-        name = raw_file.name
-        for suffix in [
-            ".sbd.nc",
-            ".sbd.csv",
-            ".dbd.nc",
-            ".dbd.csv",
-            ".tbd.nc",
-            ".tbd.csv",
-        ]:
-            if name.endswith(suffix):
-                return name[: -len(suffix)]
-        return name.rsplit(".", 1)[0]
-
-    raw_names = [get_raw_base_name(f) for f in raw_files]
-
-    # Find indices of first and last files to load using exact base name match
-    try:
-        first_idx = raw_names.index(first_base)
-    except ValueError:
-        typer.echo(f"Could not find raw file matching {first_base}")
-        return
-
-    try:
-        last_idx = raw_names.index(last_base)
-    except ValueError:
-        last_idx = first_idx
-
-    # Load from first to last + extra_files
-    end_idx = min(last_idx + extra_files + 1, len(raw_files))
-    raw_files_to_load = [str(f) for f in raw_files[first_idx:end_idx]]
-
-    typer.echo(f"Loading {len(raw_files_to_load)} raw flight files...")
-
-    # Update each L2 file
-    updated = []
-    for l2_file in files_to_update:
-        if process_l1.backfill_velocity(str(l2_file), raw_files_to_load):
-            updated.append(str(l2_file))
-
-    if updated:
-        typer.echo(f"\nUpdated {len(updated)} files:")
-        for f in updated:
-            typer.echo(f"  {f}")
-    else:
-        typer.echo("No files were updated.")
 
 
 @app.command()

@@ -545,3 +545,230 @@ def test_add_gps_fixes_all_nan() -> None:
     assert "time_gps" not in result.dims
     assert "lat_gps" not in result
     assert "lon_gps" not in result
+
+
+def test_get_profiles_assigns_profile_id() -> None:
+    """profile_id increments by 1 for each descent and each ascent in time order."""
+    # Two triangular dives: 0..max..0..max..0. A leading NaN sidesteps a
+    # profinder edge case where valid_idx is undefined for NaN-free input.
+    pressure = np.concatenate(
+        [
+            np.array([np.nan]),
+            np.linspace(1, 50, 50),
+            np.linspace(50, 1, 50),
+            np.linspace(1, 50, 50),
+            np.linspace(50, 1, 50),
+        ]
+    )
+    time = np.arange(len(pressure), dtype="f8")
+    ds = xr.Dataset(
+        {"pressure": ("time", pressure)},
+        coords={"time": time},
+    )
+
+    result = pl1.get_profiles(ds, shallowest_profile=5.0, profile_distance=10)
+
+    assert "profile_id" in result
+    pid = result.profile_id.values
+    unique = sorted({int(p) for p in pid if p >= 0})
+    # At least 4 profiles (2 dives + 2 climbs), id'd 1..N sequentially.
+    assert len(unique) >= 4
+    assert unique == list(range(1, len(unique) + 1))
+
+    # profile_id matches the dive_id/climb_id structure: dive_id == k gets
+    # profile_id 2k-1, the immediately following climb_id == k gets 2k.
+    dive_ids = sorted({int(d) for d in result.dive_id.values if d >= 0})
+    climb_ids = sorted({int(c) for c in result.climb_id.values if c >= 0})
+    for k in dive_ids:
+        dive_pids = np.unique(pid[result.dive_id.values == k])
+        assert len(dive_pids) == 1
+        assert dive_pids[0] == 2 * k - 1
+    for k in climb_ids:
+        climb_pids = np.unique(pid[result.climb_id.values == k])
+        assert len(climb_pids) == 1
+        assert climb_pids[0] == 2 * k
+
+
+def _make_synthetic_l2_ds(
+    *,
+    profile_id: np.ndarray,
+    state: np.ndarray,
+    u: float = 0.12,
+    v: float = -0.05,
+    t_uv: float = 20.0,
+) -> xr.Dataset:
+    """Build a minimal L2-shaped dataset for emit_ioos_profiles tests."""
+    time = np.arange(len(profile_id), dtype="f8") * 10.0
+    n_temp = np.where(profile_id >= 0, np.linspace(12.0, 13.0, len(profile_id)), np.nan)
+    return xr.Dataset(
+        {
+            "temperature": ("time", n_temp),
+            "profile_id": ("time", profile_id),
+            "state": ("time", state),
+            "dive_id": ("time", np.where(state == 1, 1, -1).astype("i4")),
+            "climb_id": ("time", np.where(state == 2, 1, -1).astype("i4")),
+            "u": ("time_uv", np.array([u])),
+            "v": ("time_uv", np.array([v])),
+            "time_uv": ("time_uv", np.array([t_uv])),
+            "lat_uv": ("time_uv", np.array([45.0])),
+            "lon_uv": ("time_uv", np.array([-123.0])),
+        },
+        coords={"time": time},
+    )
+
+
+def test_emit_ioos_profiles_writes_scalar_velocity(tmp_path) -> None:
+    """A profile with finite velocity is emitted as an NGDAC-shaped scalar file."""
+    ds = _make_synthetic_l2_ds(
+        profile_id=np.array([-1, 1, 1, 1, -1, -1], dtype="i4"),
+        state=np.array([0, 1, 1, 2, 0, 0], dtype="i1"),
+    )
+
+    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+
+    assert len(written) == 1
+    out = xr.open_dataset(written[0])
+    try:
+        # NGDAC contract: scalar u, v, time_uv, lat_uv, lon_uv, profile_id
+        for v in ("u", "v", "time_uv", "lat_uv", "lon_uv", "profile_id"):
+            assert v in out
+            assert out[v].ndim == 0, f"{v} must be scalar"
+        assert float(out.u.values) == 0.12
+        assert float(out.v.values) == -0.05
+        assert int(out.profile_id.values) == 1
+        # Excluded variables / dims (segment_id no longer emitted)
+        for v in ("dive_id", "climb_id", "state", "segment_id"):
+            assert v not in out
+        assert "time_uv" not in out.dims
+        # Only the in-profile time points are kept
+        assert out.sizes["time"] == 3
+    finally:
+        out.close()
+
+
+def test_emit_ioos_profiles_skips_when_velocity_nan(tmp_path) -> None:
+    """A profile in a segment with NaN u/v is skipped (no file written)."""
+    ds = _make_synthetic_l2_ds(
+        profile_id=np.array([-1, 1, 1, -1], dtype="i4"),
+        state=np.array([0, 1, 2, 0], dtype="i1"),
+        u=float("nan"),
+        v=float("nan"),
+        t_uv=15.0,
+    )
+
+    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+
+    assert written == []
+    assert list(tmp_path.glob("*.nc")) == []
+
+
+def test_emit_ioos_profiles_idempotent(tmp_path) -> None:
+    """Re-running with the same data does not write new files."""
+    ds = _make_synthetic_l2_ds(
+        profile_id=np.array([-1, 1, 1, -1], dtype="i4"),
+        state=np.array([0, 1, 2, 0], dtype="i1"),
+        u=0.1,
+        v=0.0,
+        t_uv=15.0,
+    )
+
+    first = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    assert len(first) == 1
+
+    second = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    assert second == []
+    assert len(list(tmp_path.glob("*.nc"))) == 1
+
+    forced = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider", force=True)
+    assert len(forced) == 1
+    assert len(list(tmp_path.glob("*.nc"))) == 1
+
+
+def test_emit_ioos_profiles_writes_ngdac_structural_vars(tmp_path) -> None:
+    """platform, crs, profile_time, profile_lat, profile_lon, and configured
+    instrument scalars are all written into each emitted file."""
+    ds = _make_synthetic_l2_ds(
+        profile_id=np.array([-1, 1, 1, 1, -1, -1], dtype="i4"),
+        state=np.array([0, 1, 1, 2, 0, 0], dtype="i1"),
+    )
+    # Add the lat/lon arrays that profile_lat/lon are derived from.
+    ds["lat"] = ("time", np.linspace(45.0, 45.5, ds.sizes["time"]))
+    ds["lon"] = ("time", np.linspace(-123.0, -122.5, ds.sizes["time"]))
+
+    instruments = {
+        "instrument_ctd": {
+            "long_name": "Test CTD",
+            "make_model": "Sea-Bird GPCTD",
+            "serial_number": "9264",
+            "type": "instrument",
+            "platform": "platform",
+        },
+        "instrument_oxygen": {
+            "long_name": "Test Oxygen Sensor",
+            "make_model": "Aanderaa Optode 4831",
+            "serial_number": "416",
+            "type": "instrument",
+            "platform": "platform",
+        },
+    }
+
+    written = pl1.emit_ioos_profiles(
+        ds, tmp_path, "synthglider", instruments=instruments
+    )
+    assert len(written) == 1
+    out = xr.open_dataset(written[0])
+    try:
+        # platform and crs scalars present.
+        assert "platform" in out and out.platform.ndim == 0
+        assert "crs" in out and out.crs.ndim == 0
+        assert out.platform.attrs.get("id") == "synthglider"
+        assert out.platform.attrs.get("type") == "platform"
+        # platform.instrument enumerates the configured instruments.
+        assert "instrument_ctd" in out.platform.attrs.get("instrument", "")
+        assert "instrument_oxygen" in out.platform.attrs.get("instrument", "")
+        # CRS is WGS84 boilerplate.
+        assert out.crs.attrs.get("epsg_code") == "EPSG:4326"
+
+        # Configured instruments emitted as scalars with their attrs.
+        for name, attrs in instruments.items():
+            assert name in out and out[name].ndim == 0
+            for k, v in attrs.items():
+                assert out[name].attrs.get(k) == v, (
+                    f"{name}.{k}: expected {v}, got {out[name].attrs.get(k)}"
+                )
+
+        # Profile-center variables.
+        for v in ("profile_time", "profile_lat", "profile_lon"):
+            assert v in out and out[v].ndim == 0
+        assert np.isfinite(out.profile_lat.values)
+        assert np.isfinite(out.profile_lon.values)
+        # Profile center is the mean of the in-profile lat/lon (indices 1,2,3).
+        expected_lat = float(np.mean(ds.lat.values[1:4]))
+        assert abs(float(out.profile_lat.values) - expected_lat) < 1e-9
+    finally:
+        out.close()
+
+
+def test_emit_ioos_profiles_yo_yo_shares_time_uv(tmp_path) -> None:
+    """Profiles in the same segment share time_uv (canonical NGDAC grouping)."""
+    # surface, dive, climb, dive, climb, surface — 4 profiles in one segment
+    ds = _make_synthetic_l2_ds(
+        profile_id=np.array([-1, 1, 2, 3, 4, -1], dtype="i4"),
+        state=np.array([0, 1, 2, 1, 2, 0], dtype="i1"),
+        u=0.2,
+        v=0.1,
+        t_uv=25.0,
+    )
+
+    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    assert len(written) == 4
+
+    time_uvs = []
+    for f in written:
+        out = xr.open_dataset(f)
+        time_uvs.append(float(out.time_uv.values))
+        out.close()
+
+    # All four profiles share the same scalar time_uv (= the segment's value).
+    assert all(t == time_uvs[0] for t in time_uvs)
+    assert time_uvs[0] == 25.0
