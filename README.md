@@ -15,11 +15,11 @@ Additionally, we provide the following intermediate processing outputs that may 
 
 * **L1B**: The L1 data are parsed and basic quality control is performed but science and flight data are not merged.
 
-## Workflow note: concatenate first
+## Real-time workflow note
 
-`glide` is designed to be run on the **full concatenated dataset** for a deployment, not on individual segment files as they arrive. Use `dbd2netcdf` (which is fast — written in C) to merge all `*.sbd`/`*.dbd` and `*.tbd`/`*.ebd` files into single concatenated L1 files, then run `glide l2` on those.
+`glide` is designed to be run on the **full concatenated dataset** for a deployment, not on individual segment files as they arrive. Use `dbd2netcdf` to merge all `*.sbd`/`*.dbd` and `*.tbd`/`*.ebd` files into single concatenated L1 file, then run `glide l2` on those.
 
-Re-running `glide l2` is cheap and idempotent — the recommended pattern is to re-concatenate and re-run after every surfacing. This avoids the gaps that arise when velocity, GPS, or other state is reported only at the next surfacing. It is especially important for IOOS DAC submission (`--ioos`), where per-profile files are only emitted once their depth-averaged velocity has been reported.
+Re-running `glide l2` on real-time data is cheap and idempotent — the recommended pattern is to re-concatenate and re-run after every surfacing. This avoids the gaps that arise when velocity, GPS, or other state is reported only at the next surfacing. It is especially important for DAC submission (`--ioos`), where per-profile files are only emitted once their depth-averaged velocity has been reported.
 
 ## Installation
 
