@@ -10,20 +10,53 @@ _log = logging.getLogger(__name__)
 
 
 def get_profiles(
-    ds: xr.Dataset, shallowest_profile: float, profile_distance: int
+    ds: xr.Dataset,
+    shallowest_profile: float,
+    min_surface_time: float = 180.0,
 ) -> xr.Dataset:
+    """Identify dive and climb profiles from a pressure time series.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Merged L2 dataset with 'pressure' and 'time' variables.
+    shallowest_profile : float
+        Minimum peak pressure (dbar) for a profile to be recognised.
+    min_surface_time : float
+        Minimum time (seconds) between consecutive dive apexes.  Used to
+        compute sample-count thresholds so the detector adapts to the data
+        sampling rate.  A value of ~180 s works for most Slocum deployments.
+    """
+    raw_diff = np.diff(ds.time.values)
+    if np.issubdtype(raw_diff.dtype, np.timedelta64):
+        dt_s = float(np.nanmedian(raw_diff.astype("timedelta64[s]").astype("f8")))
+    else:
+        dt_s = float(np.nanmedian(raw_diff))  # already float seconds
+    fs = 1.0 / dt_s  # samples per second
+
     peaks_kwargs = {
         "height": shallowest_profile,
-        "distance": profile_distance,
-        "width": profile_distance,
         "prominence": shallowest_profile,
+        "distance": max(4, round(min_surface_time * fs)),
+        "width": max(2, round(20 * fs)),  # ≥20 s half-width detects ~10 m dives
+    }
+    troughs_kwargs = {
+        "prominence": 2,
+        "distance": max(2, round(30 * fs)),
+        "width": max(1, round(5 * fs)),
     }
 
-    _log.debug("Finding profiles with peaks_kwargs %s", peaks_kwargs)
+    _log.debug(
+        "fs=%.3f Hz; peaks_kwargs=%s; troughs_kwargs=%s",
+        fs,
+        peaks_kwargs,
+        troughs_kwargs,
+    )
 
     profiles = find_profiles(
         ds.pressure.values,
         peaks_kwargs=peaks_kwargs,
+        troughs_kwargs=troughs_kwargs,
         missing="drop",
     )
 

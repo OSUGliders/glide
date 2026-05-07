@@ -143,12 +143,16 @@ def l2(
     shallowest_profile: Annotated[
         float, typer.Option("-s", help="Shallowest allowed profile in dbar.")
     ] = 5.0,
-    profile_distance: Annotated[
-        int,
+    min_surface_time: Annotated[
+        float,
         typer.Option(
-            "-d", help="Minimum distance between profiles in number of data points."
+            "-d",
+            "--min-surface-time",
+            help="Minimum time in seconds between consecutive dive apexes. "
+            "Controls the inter-profile gap threshold and scales with the "
+            "data sampling rate automatically.",
         ),
-    ] = 20,
+    ] = 180.0,
     skip_unpaired: Annotated[
         bool,
         typer.Option(
@@ -224,7 +228,7 @@ def l2(
 
     merged = process_l1.calculate_thermodynamics(merged, conf)
 
-    out = profiles.get_profiles(merged, shallowest_profile, profile_distance)
+    out = profiles.get_profiles(merged, shallowest_profile, min_surface_time)
 
     out = profiles.assign_surface_state(out, flt=flt_raw)
 
