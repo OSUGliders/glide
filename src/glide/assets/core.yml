@@ -198,8 +198,10 @@ roll:
 # PIPELINE — added by named processing functions (no `source` field)
 
 # GPS coordinates (add_gps_fixes): valid surface fixes on a dedicated time_gps dimension
+# See config.yml for instructions on adding companion variables to time_gps.
 
 time_gps:
+  anchor: [lat_gps, lon_gps]  # defines the valid-fix mask for this dimension
   drop_from_l3: True
   CF:
     calendar: gregorian
