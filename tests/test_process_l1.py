@@ -545,3 +545,208 @@ def test_add_gps_fixes_all_nan() -> None:
     assert "time_gps" not in result.dims
     assert "lat_gps" not in result
     assert "lon_gps" not in result
+
+
+def test_assign_segment_id_basic() -> None:
+    """Each maximal run of state != 0 gets a unique segment_id."""
+    # state pattern: surface, dive, dive, climb, surface, dive, dive, surface
+    # Two underwater segments: indices 1-3 and 5-6
+    state = np.array([0, 1, 1, 2, 0, 1, 1, 0], dtype="i1")
+    ds = xr.Dataset(
+        {"state": ("time", state)},
+        coords={"time": np.arange(len(state), dtype="f8")},
+    )
+
+    result = pl1.assign_segment_id(ds)
+
+    seg = result.segment_id.values
+    assert seg.tolist() == [-1, 1, 1, 1, -1, 2, 2, -1]
+
+
+def test_assign_segment_id_edge_segments() -> None:
+    """Segments at the start or end of the dataset still get an id."""
+    # Dataset starts and ends underwater
+    state = np.array([1, 1, 0, 1, 1, 0, 2, 2], dtype="i1")
+    ds = xr.Dataset(
+        {"state": ("time", state)},
+        coords={"time": np.arange(len(state), dtype="f8")},
+    )
+
+    result = pl1.assign_segment_id(ds)
+
+    seg = result.segment_id.values
+    # Three segments: indices 0-1 (leading), 3-4 (middle), 6-7 (trailing)
+    assert seg.tolist() == [1, 1, -1, 2, 2, -1, 3, 3]
+
+
+def test_assign_segment_id_includes_unknown_state() -> None:
+    """state == -1 (unknown) is treated as underwater for segment grouping."""
+    # state == -1 is "unknown" (between profiles) and is part of a segment
+    state = np.array([0, 1, -1, 2, 0], dtype="i1")
+    ds = xr.Dataset(
+        {"state": ("time", state)},
+        coords={"time": np.arange(len(state), dtype="f8")},
+    )
+
+    result = pl1.assign_segment_id(ds)
+
+    seg = result.segment_id.values
+    assert seg.tolist() == [-1, 1, 1, 1, -1]
+
+
+def test_assign_segment_id_no_state() -> None:
+    """Returns dataset unchanged when state variable is missing."""
+    ds = xr.Dataset(coords={"time": np.arange(3, dtype="f8")})
+    result = pl1.assign_segment_id(ds)
+    assert "segment_id" not in result
+
+
+def test_get_profiles_assigns_profile_id() -> None:
+    """profile_id increments by 1 for each descent and each ascent in time order."""
+    # Two triangular dives: 0..max..0..max..0. A leading NaN sidesteps a
+    # profinder edge case where valid_idx is undefined for NaN-free input.
+    pressure = np.concatenate(
+        [
+            np.array([np.nan]),
+            np.linspace(1, 50, 50),
+            np.linspace(50, 1, 50),
+            np.linspace(1, 50, 50),
+            np.linspace(50, 1, 50),
+        ]
+    )
+    time = np.arange(len(pressure), dtype="f8")
+    ds = xr.Dataset(
+        {"pressure": ("time", pressure)},
+        coords={"time": time},
+    )
+
+    result = pl1.get_profiles(ds, shallowest_profile=5.0, profile_distance=10)
+
+    assert "profile_id" in result
+    pid = result.profile_id.values
+    unique = sorted({int(p) for p in pid if p >= 0})
+    # At least 4 profiles (2 dives + 2 climbs), id'd 1..N sequentially.
+    assert len(unique) >= 4
+    assert unique == list(range(1, len(unique) + 1))
+
+    # profile_id matches the dive_id/climb_id structure: dive_id == k gets
+    # profile_id 2k-1, the immediately following climb_id == k gets 2k.
+    dive_ids = sorted({int(d) for d in result.dive_id.values if d >= 0})
+    climb_ids = sorted({int(c) for c in result.climb_id.values if c >= 0})
+    for k in dive_ids:
+        dive_pids = np.unique(pid[result.dive_id.values == k])
+        assert len(dive_pids) == 1
+        assert dive_pids[0] == 2 * k - 1
+    for k in climb_ids:
+        climb_pids = np.unique(pid[result.climb_id.values == k])
+        assert len(climb_pids) == 1
+        assert climb_pids[0] == 2 * k
+
+
+def test_emit_ioos_profiles_writes_scalar_velocity(tmp_path) -> None:
+    """A profile with finite velocity is emitted as an NGDAC-shaped scalar file."""
+    # Build a minimal L2-shaped dataset by hand: 6 time points, one profile,
+    # one segment, one velocity entry on time_uv.
+    time = np.array([0.0, 10.0, 20.0, 30.0, 40.0, 50.0])  # epoch seconds
+    profile_id = np.array([-1, 1, 1, 1, -1, -1], dtype="i4")
+    segment_id = np.array([-1, 1, 1, 1, -1, -1], dtype="i4")
+    state = np.array([0, 1, 1, 2, 0, 0], dtype="i1")
+
+    ds = xr.Dataset(
+        {
+            "temperature": (
+                "time",
+                np.array([np.nan, 12.0, 12.5, 13.0, np.nan, np.nan]),
+            ),
+            "profile_id": ("time", profile_id),
+            "segment_id": ("time", segment_id),
+            "state": ("time", state),
+            "dive_id": ("time", np.array([-1, 1, 1, -1, -1, -1], dtype="i4")),
+            "climb_id": ("time", np.array([-1, -1, -1, 1, -1, -1], dtype="i4")),
+            "u": ("time_uv", np.array([0.12])),
+            "v": ("time_uv", np.array([-0.05])),
+            "time_uv": ("time_uv", np.array([20.0])),
+            "lat_uv": ("time_uv", np.array([45.0])),
+            "lon_uv": ("time_uv", np.array([-123.0])),
+        },
+        coords={"time": time},
+    )
+
+    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+
+    assert len(written) == 1
+    f = written[0]
+    assert f.exists()
+
+    out = xr.open_dataset(f)
+    try:
+        # NGDAC contract: scalar u, v, time_uv, lat_uv, lon_uv, profile_id, segment_id
+        for v in ("u", "v", "time_uv", "lat_uv", "lon_uv", "profile_id", "segment_id"):
+            assert v in out
+            assert out[v].ndim == 0, f"{v} must be scalar"
+        assert float(out.u.values) == 0.12
+        assert float(out.v.values) == -0.05
+        assert int(out.profile_id.values) == 1
+        assert int(out.segment_id.values) == 1
+        # Excluded variables / dims
+        for v in ("dive_id", "climb_id", "state"):
+            assert v not in out
+        assert "time_uv" not in out.dims
+        # Only the in-profile time points are kept
+        assert out.sizes["time"] == 3
+    finally:
+        out.close()
+
+
+def test_emit_ioos_profiles_skips_when_velocity_nan(tmp_path) -> None:
+    """A profile in a segment with NaN u/v is skipped (no file written)."""
+    time = np.array([0.0, 10.0, 20.0, 30.0])
+    ds = xr.Dataset(
+        {
+            "temperature": ("time", np.array([np.nan, 12.0, 12.5, np.nan])),
+            "profile_id": ("time", np.array([-1, 1, 1, -1], dtype="i4")),
+            "segment_id": ("time", np.array([-1, 1, 1, -1], dtype="i4")),
+            "state": ("time", np.array([0, 1, 2, 0], dtype="i1")),
+            "u": ("time_uv", np.array([np.nan])),
+            "v": ("time_uv", np.array([np.nan])),
+            "time_uv": ("time_uv", np.array([15.0])),
+            "lat_uv": ("time_uv", np.array([np.nan])),
+            "lon_uv": ("time_uv", np.array([np.nan])),
+        },
+        coords={"time": time},
+    )
+
+    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+
+    assert written == []
+    assert list(tmp_path.glob("*.nc")) == []
+
+
+def test_emit_ioos_profiles_idempotent(tmp_path) -> None:
+    """Re-running with the same data does not write new files."""
+    time = np.array([0.0, 10.0, 20.0, 30.0])
+    ds = xr.Dataset(
+        {
+            "temperature": ("time", np.array([np.nan, 12.0, 12.5, np.nan])),
+            "profile_id": ("time", np.array([-1, 1, 1, -1], dtype="i4")),
+            "segment_id": ("time", np.array([-1, 1, 1, -1], dtype="i4")),
+            "state": ("time", np.array([0, 1, 2, 0], dtype="i1")),
+            "u": ("time_uv", np.array([0.1])),
+            "v": ("time_uv", np.array([0.0])),
+            "time_uv": ("time_uv", np.array([15.0])),
+            "lat_uv": ("time_uv", np.array([45.0])),
+            "lon_uv": ("time_uv", np.array([-123.0])),
+        },
+        coords={"time": time},
+    )
+
+    first = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    assert len(first) == 1
+
+    second = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    assert second == []
+    assert len(list(tmp_path.glob("*.nc"))) == 1
+
+    forced = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider", force=True)
+    assert len(forced) == 1
+    assert len(list(tmp_path.glob("*.nc"))) == 1

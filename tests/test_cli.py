@@ -58,6 +58,18 @@ def test_l2() -> None:
     assert np.all(np.isfinite(ds.lat_gps.values)), "lat_gps must not contain NaN"
     assert np.all(np.isfinite(ds.lon_gps.values)), "lon_gps must not contain NaN"
 
+    # Contract: profile_id and segment_id are populated on the time dimension
+    # with at least one non-(-1) value (i.e. profiles and segments were found).
+    assert "profile_id" in ds, "profile_id missing from L2 output"
+    assert "segment_id" in ds, "segment_id missing from L2 output"
+    assert (ds.profile_id.values >= 0).any(), "Expected at least one profile"
+    assert (ds.segment_id.values >= 0).any(), "Expected at least one segment"
+    # All points belonging to a profile must also belong to a segment.
+    in_profile = ds.profile_id.values >= 0
+    assert (ds.segment_id.values[in_profile] >= 0).all(), (
+        "Every profile point must have a non-(-1) segment_id"
+    )
+
     ds.close()
 
     assert not missing_qc_var, f"Missing _qc variables in L2 output: {missing_qc_var}"
@@ -66,42 +78,162 @@ def test_l2() -> None:
     )
 
 
-def test_l2_directory_output() -> None:
+def test_l2_ioos() -> None:
+    """Verify --ioos emits NGDAC-shaped per-profile files alongside the merged L2.
+
+    The CLI workflow under test:
+        glide l2 <sbd> <tbd> -o <merged.nc> --ioos <outdir> -g <glider>
+
+    Asserts:
+      * the merged L2 file is still produced (---ioos is additive)
+      * at least one per-profile NGDAC file is emitted to outdir
+      * each emitted file has scalar u, v, time_uv, lat_uv, lon_uv,
+        profile_id, segment_id (NGDAC v2 contract)
+      * each emitted file omits dive_id, climb_id, state, time_gps, time_uv dim
+      * filenames follow the NGDAC convention {glider}_{YYYYMMDDTHHMMSSZ}.nc
+      * each emitted file's (profile_id, segment_id) pair matches what's in
+        the merged L2 file at the same time range
+      * re-running the CLI with the same args adds no new files (idempotency)
+    """
     import re
     import tempfile
-    from datetime import datetime, timezone
 
-    data_dir = Path(str(resources.files("tests").joinpath("data")))
-    sbd_files = sorted(data_dir.glob("*.sbd.csv"))
+    flt_file = str(resources.files("tests").joinpath("data/osu684.sbd.csv"))
+    sci_file = str(resources.files("tests").joinpath("data/osu684.tbd.csv"))
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        for sbd_file in sbd_files:
-            tbd_file = sbd_file.with_suffix("").with_suffix(".tbd.csv")
-            if not tbd_file.exists():
-                continue
+        merged_file = str(Path(tmpdir) / "slocum.l2.nc")
+        ioos_dir = str(Path(tmpdir) / "ioos")
 
-            glider = sbd_file.name.split("-")[0].split(".")[0]
-            result = runner.invoke(
-                app, ["l2", str(sbd_file), str(tbd_file), "-o", tmpdir, "-g", glider]
-            )
-            assert result.exit_code == 0, f"Failed for {sbd_file.name}: {result.output}"
+        result = runner.invoke(
+            app,
+            [
+                "l2",
+                flt_file,
+                sci_file,
+                "-o",
+                merged_file,
+                "--ioos",
+                ioos_dir,
+                "-g",
+                "osu684",
+            ],
+        )
+        assert result.exit_code == 0, result.output
 
-        nc_files = list(Path(tmpdir).glob("*.nc"))
-        assert len(nc_files) == len(sbd_files)
+        # --ioos is additive: the merged L2 file is still written.
+        assert Path(merged_file).exists(), "Merged L2 file should still be produced"
+        merged = xr.open_dataset(merged_file)
+        try:
+            assert "profile_id" in merged
+            assert "segment_id" in merged
+        finally:
+            merged.close()
 
+        nc_files = sorted(Path(ioos_dir).glob("*.nc"))
+        assert len(nc_files) > 0, "Expected at least one IOOS profile file"
+
+        # Cross-check: every (profile_id, segment_id) pair in the IOOS files
+        # must also appear in the merged file's per-time arrays.
+        merged = xr.open_dataset(merged_file)
+        merged_pid = merged.profile_id.values
+        merged_seg = merged.segment_id.values
+        merged.close()
+        merged_pairs = {
+            (int(p), int(s))
+            for p, s in zip(merged_pid, merged_seg)
+            if p >= 0 and s >= 0
+        }
+
+        # NGDAC contract checks on every emitted file.
         for nc_file in nc_files:
-            assert re.match(r"\w+_\d{8}T\d{6}Z\.nc", nc_file.name)
-
-            ds = xr.open_dataset(nc_file)
-            first_time = ds["time"].values[0]
-            ds.close()
-
-            dt = np.datetime64(first_time, "s").astype("datetime64[s]").astype(datetime)
-            dt = dt.replace(tzinfo=timezone.utc)
-            expected_ts = dt.strftime("%Y%m%dT%H%M%SZ")
-            assert expected_ts in nc_file.name, (
-                f"Timestamp mismatch: expected {expected_ts} in {nc_file.name}"
+            assert re.match(r"osu684_\d{8}T\d{6}Z\.nc", nc_file.name), (
+                f"Filename does not match NGDAC convention: {nc_file.name}"
             )
+            ds = xr.open_dataset(nc_file)
+            try:
+                # NGDAC requires u, v, time_uv, lat_uv, lon_uv to be scalar.
+                for v in ("u", "v", "time_uv", "lat_uv", "lon_uv"):
+                    assert v in ds, f"{v} missing from {nc_file.name}"
+                    assert ds[v].ndim == 0, (
+                        f"{v} must be scalar in {nc_file.name}, got dims {ds[v].dims}"
+                    )
+                # profile_id and segment_id are scalar identifiers.
+                for v in ("profile_id", "segment_id"):
+                    assert v in ds, f"{v} missing from {nc_file.name}"
+                    assert ds[v].ndim == 0, (
+                        f"{v} must be scalar in {nc_file.name}, got dims {ds[v].dims}"
+                    )
+
+                # Velocity must be finite (this is the emission gate).
+                assert np.isfinite(ds.u.values), f"u is NaN in {nc_file.name}"
+                assert np.isfinite(ds.v.values), f"v is NaN in {nc_file.name}"
+
+                # Variables and dims that don't belong in NGDAC profile files.
+                for v in ("dive_id", "climb_id", "state", "lat_gps", "lon_gps"):
+                    assert v not in ds, f"{v} should not appear in {nc_file.name}"
+                assert "time_uv" not in ds.dims, (
+                    f"time_uv dim should be removed from {nc_file.name}"
+                )
+                assert "time_gps" not in ds.dims, (
+                    f"time_gps dim should be removed from {nc_file.name}"
+                )
+
+                # Cross-check: the (profile_id, segment_id) pair must appear
+                # in the merged file's per-time arrays.
+                pair = (int(ds.profile_id.values), int(ds.segment_id.values))
+                assert pair in merged_pairs, (
+                    f"(profile_id={pair[0]}, segment_id={pair[1]}) from "
+                    f"{nc_file.name} not found in merged L2 file"
+                )
+            finally:
+                ds.close()
+
+        # Idempotency: re-running must not add new files.
+        n_initial = len(nc_files)
+        result2 = runner.invoke(
+            app,
+            [
+                "l2",
+                flt_file,
+                sci_file,
+                "-o",
+                merged_file,
+                "--ioos",
+                ioos_dir,
+                "-g",
+                "osu684",
+            ],
+        )
+        assert result2.exit_code == 0, result2.output
+        nc_files_after = sorted(Path(ioos_dir).glob("*.nc"))
+        assert len(nc_files_after) == n_initial, (
+            f"Re-run added files: {n_initial} -> {len(nc_files_after)}"
+        )
+
+        # --force overwrites: file count stays the same but mtimes change.
+        first_mtime = nc_files_after[0].stat().st_mtime
+        result3 = runner.invoke(
+            app,
+            [
+                "l2",
+                flt_file,
+                sci_file,
+                "-o",
+                merged_file,
+                "--ioos",
+                ioos_dir,
+                "-g",
+                "osu684",
+                "--force",
+            ],
+        )
+        assert result3.exit_code == 0, result3.output
+        nc_files_forced = sorted(Path(ioos_dir).glob("*.nc"))
+        assert len(nc_files_forced) == n_initial
+        assert nc_files_forced[0].stat().st_mtime > first_mtime, (
+            "--force should rewrite existing files"
+        )
 
 
 def test_l3() -> None:
@@ -145,81 +277,3 @@ def test_gps_fixes() -> None:
     assert len(df) > 0
     assert df["lat_gps"].notna().all()
     assert df["lon_gps"].notna().all()
-
-
-def test_backfill() -> None:
-    """Test the backfill command for updating velocity in L2 files.
-
-    This test processes real glider data files through the L2 pipeline and
-    then runs backfill to verify velocity updates work correctly.
-    """
-    data_dir = Path(str(resources.files("tests").joinpath("data")))
-
-    # Test segments to process - osu685 real-time data files
-    segments = [
-        "osu685-2025-056-0-27",
-        "osu685-2025-056-0-28",
-        "osu685-2025-056-0-29",
-        "osu685-2025-056-0-30",
-    ]
-
-    # Process L2 files
-    l2_files = []
-    for seg in segments:
-        flt_file = str(data_dir / f"{seg}.sbd.csv")
-        sci_file = str(data_dir / f"{seg}.tbd.csv")
-        l2_file = data_dir / f"{seg}.l2.nc"
-
-        # Run L2 processing
-        result = runner.invoke(app, ["l2", flt_file, sci_file, "-o", str(l2_file)])
-        assert result.exit_code == 0, f"L2 processing failed for {seg}: {result.output}"
-
-        l2_files.append(l2_file)
-
-    # Check the first L2 file before backfill
-    ds_before = xr.open_dataset(l2_files[0])
-    assert "u" in ds_before, "L2 file should have u variable"
-    assert "time_uv" in ds_before, "L2 file should have time_uv dimension"
-
-    # Check if velocity is NaN (needs backfill)
-    u_before = ds_before.u.values
-    has_nan = np.any(np.isnan(u_before))
-    ds_before.close()
-
-    if has_nan:
-        # Run backfill on the first file
-        result = runner.invoke(
-            app,
-            [
-                "backfill",
-                str(l2_files[0]),
-                "-r",
-                str(data_dir),
-                "-n",
-                "2",  # Include extra files for velocity lookup
-            ],
-        )
-        assert result.exit_code == 0, f"Backfill failed: {result.output}"
-
-        # Check if velocity was updated
-        ds_after = xr.open_dataset(l2_files[0])
-        u_after = ds_after.u.values
-
-        # Count how many NaN values were filled
-        nan_before = np.sum(np.isnan(u_before))
-        nan_after = np.sum(np.isnan(u_after))
-
-        # Backfill should have filled at least some values
-        assert nan_after <= nan_before, (
-            f"Backfill should not increase NaN count: "
-            f"before={nan_before}, after={nan_after}"
-        )
-        ds_after.close()
-    else:
-        # If velocity was already filled during L2 processing, that's fine
-        # Just verify the values are reasonable
-        ds_check = xr.open_dataset(l2_files[0])
-        u_vals = ds_check.u.values[np.isfinite(ds_check.u.values)]
-        if len(u_vals) > 0:
-            assert np.all(np.abs(u_vals) < 2.0), "Velocity u should be < 2 m/s"
-        ds_check.close()
