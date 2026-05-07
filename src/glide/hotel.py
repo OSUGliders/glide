@@ -26,3 +26,12 @@ def save_hotel(hotel_struct: dict, out_file: str) -> None:
 
 def extract_gps(ds: xr.Dataset) -> xr.Dataset:
     return ds[["lat", "lon"]].dropna("time")
+
+
+def extract_gps_fixes(ds: xr.Dataset) -> xr.Dataset:
+    if "time_gps" not in ds.dims:
+        raise ValueError(
+            "Dataset has no time_gps dimension — was it produced by glide l2?"
+        )
+    fix_vars = [v for v in ds.data_vars if ds[v].dims == ("time_gps",)]
+    return ds[fix_vars].set_index(time_gps="time_gps")
