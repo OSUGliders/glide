@@ -521,7 +521,7 @@ requires-dist = [
     { name = "netcdf4", specifier = ">=1.7.2" },
     { name = "numpy", specifier = ">=2.2.2" },
     { name = "pandas", specifier = ">=2.2.3" },
-    { name = "profinder", specifier = "==0.2.3" },
+    { name = "profinder", specifier = "==0.2.5" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "scipy", specifier = ">=1.15.1" },
     { name = "typer-slim", specifier = ">=0.15.2" },
@@ -1413,15 +1413,15 @@ wheels = [
 
 [[package]]
 name = "profinder"
-version = "0.2.3"
+version = "0.2.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7d/a9/0667cff02a09a18a17bfeee3e7fcc4806b4329159b5183f8e50f8df95f35/profinder-0.2.3.tar.gz", hash = "sha256:b8136eadad68263f05646142c8fc67268f32f3f8bc082f35346799a062ae80ac", size = 651856, upload-time = "2025-09-25T18:17:09.324Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/83/9dc440eb1ade51b757c959e98ca340ba4176d8a90e30ec8afb6be295be8b/profinder-0.2.5.tar.gz", hash = "sha256:f1c6e63e0f5cba1456122c0b259049c6a4d9963677f0570c2536ada8107a4da7", size = 654479, upload-time = "2026-05-07T07:47:49.911Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7a/cc/901eb5826b1bcd441908294d8b3dc406e212b674ca1138f1ea02a5bf9d9e/profinder-0.2.3-py3-none-any.whl", hash = "sha256:69b21413cbd5d2695b6b35a2b3ee27f81d4d30903d38cf687dbd3cc137115a12", size = 19367, upload-time = "2025-09-25T18:17:07.659Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/06/daa1051c8ad90baa574eea221e5becd79ff00ec1c5570a352a1870b0f704/profinder-0.2.5-py3-none-any.whl", hash = "sha256:948e760c5b0415c7f6c8b8752527b3fb45e1f593d29c6eb3a982717d5b91d043", size = 19529, upload-time = "2026-05-07T07:47:48.428Z" },
 ]
 
 [[package]]
