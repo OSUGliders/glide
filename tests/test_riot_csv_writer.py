@@ -123,18 +123,22 @@ class TestWriteRiotCsv:
         expected = days * 86400 * 1000 + secs * 1000 + msecs
         np.testing.assert_array_equal(df["epochMsecs"].values, expected)
 
-    def test_append_mode(self, tmp_path: object) -> None:
-        """Calling write_riot_csv twice should append without repeating headers."""
+    def test_overwrite_idempotent(self, tmp_path: object) -> None:
+        """Calling write_riot_csv twice with the same data overwrites — does not
+        append. The CSV is a derived artifact of the L2 dataset, so re-running
+        the pipeline must reproduce the same file rather than duplicating rows.
+        """
         out = str(tmp_path / "riot.csv")  # type: ignore[operator]
         ds = _make_riot_dataset(n=3)
         write_riot_csv(ds, add_positions=False, output_path=out)
+        first = pd.read_csv(out)
+
         write_riot_csv(ds, add_positions=False, output_path=out)
+        second = pd.read_csv(out)
 
-        with open(out) as f:
-            lines = f.readlines()
-
-        # header once + 3 rows + 3 appended rows = 7 lines
-        assert len(lines) == 7
+        # Row count is unchanged (no doubling) and contents are identical.
+        assert len(second) == len(first) == 3
+        pd.testing.assert_frame_equal(first, second)
 
     def test_riot_data_prefix(self, tmp_path: object) -> None:
         """Every row should have '$riotData' in the riotDataPrefix column."""

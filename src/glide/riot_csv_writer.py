@@ -1,7 +1,6 @@
 # Functions to parse the RIOT acoustics data and write to CSV
 
 import logging
-import os
 from collections import OrderedDict
 
 import numpy as np
@@ -118,18 +117,13 @@ def write_riot_csv(ds: xr.Dataset, add_positions: bool, output_path: str) -> Non
     if add_positions:
         riot_df = _add_positions(ds, riot_df, rows_to_keep)
 
-    # Write to CSV
+    # Write to CSV. The CSV is a derived artifact of the L2 dataset, so we
+    # always overwrite it — re-running glide l2 with the same input produces
+    # the same CSV. (Earlier versions appended, which under the new workflow
+    # of reprocessing the full concatenated dataset at every surfacing would
+    # cause runaway duplication of every row.)
     _log.debug(f"Writing to RIOT CSV: {output_path}")
-    # If the file exists already, it will append, so don't write
-    # the header.
-    if os.path.exists(output_path):
-        headerwrite = False
-    else:
-        headerwrite = True
-
-    riot_df.to_csv(
-        output_path, index=False, header=headerwrite, lineterminator="\n", mode="a"
-    )
+    riot_df.to_csv(output_path, index=False, header=True, lineterminator="\n", mode="w")
 
 
 def _add_positions(ds, riot_df, rows_to_keep):
