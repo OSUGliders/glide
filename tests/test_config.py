@@ -41,30 +41,6 @@ def test_apply_qc_overrides_disallowed_key_ignored():
 # ---------------------------------------------------------------------------
 
 
-def test_load_config_merged_variables_present():
-    # Regression: inserting an extra YAML document shifts the positional parsing
-    # in load_config (docs[4]), silently dropping merged_variables entirely.
-    conf = config.load_config()
-    assert conf["merged_variables"], (
-        "merged_variables should not be empty in default config"
-    )
-    assert "e_1" in conf["merged_variables"]
-    assert "e_2" in conf["merged_variables"]
-
-
-def test_load_config_instruments_present():
-    # Regression: instruments live in the 6th YAML document. If the loader's
-    # positional indexing is off by one, this dict is silently empty.
-    conf = config.load_config()
-    assert "instruments" in conf
-    assert "instrument_ctd" in conf["instruments"], (
-        "instrument_ctd should be loaded from the bundled config.yml"
-    )
-    ctd = conf["instruments"]["instrument_ctd"]
-    assert ctd.get("make_model") == "Sea-Bird GPCTD"
-    assert ctd.get("type") == "instrument"
-
-
 def test_load_config_time_gps_has_anchor():
     # The anchor field drives which time points are kept in add_gps_fixes()
     conf = config.load_config()
@@ -89,6 +65,10 @@ def test_load_config_time_valid_min_max_are_floats():
 
 
 def _write_temp_config(content: str) -> str:
+    """Write a single-document YAML config to a tempfile.
+
+    The content is dedented so test strings can use Python indentation.
+    """
     f = tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False)
     f.write(textwrap.dedent(content))
     f.close()
@@ -101,15 +81,12 @@ def test_load_config_exclude_thermo():
           name: test_glider
           attributes: {}
         netcdf_attributes: {}
-        ---
         include:
           flight: true
           thermo: false
-        ---
+        instruments: {}
         qc: {}
-        ---
         l1_variables: {}
-        ---
         merged_variables: {}
     """)
     try:
@@ -127,20 +104,17 @@ def test_load_config_qc_override_applied():
           name: test_glider
           attributes: {}
         netcdf_attributes: {}
-        ---
         include:
           flight: true
           thermo: true
-        ---
+        instruments: {}
         qc:
           temperature:
             valid_min: -2.0
             valid_max: 15.0
           lat:
             max_gap: 900
-        ---
         l1_variables: {}
-        ---
         merged_variables: {}
     """)
     try:
@@ -158,13 +132,11 @@ def test_load_config_companion_variable():
           name: test_glider
           attributes: {}
         netcdf_attributes: {}
-        ---
         include:
           flight: true
           thermo: true
-        ---
+        instruments: {}
         qc: {}
-        ---
         l1_variables:
           hdop_gps:
             source: m_gps_uncertainty
@@ -174,7 +146,6 @@ def test_load_config_companion_variable():
             CF:
               long_name: GPS horizontal dilution of precision
               units: "1"
-        ---
         merged_variables: {}
     """)
     try:
@@ -184,5 +155,51 @@ def test_load_config_companion_variable():
         assert spec["companion_dim"] == "time_gps"
         assert spec["drop_from_l2"] is True
         assert conf["slocum"]["m_gps_uncertainty"] == "hdop_gps"
+    finally:
+        os.unlink(path)
+
+
+def test_load_config_missing_section_raises():
+    """Strict validation: omitting a required section raises ValueError with
+    a list of the missing sections, not a silent default-to-empty."""
+    import pytest
+
+    # Drop `instruments` and `merged_variables` from the otherwise-valid config
+    path = _write_temp_config("""\
+        trajectory:
+          name: test_glider
+          attributes: {}
+        netcdf_attributes: {}
+        include:
+          flight: true
+          thermo: true
+        qc: {}
+        l1_variables: {}
+    """)
+    try:
+        with pytest.raises(ValueError, match="missing required section"):
+            config.load_config(path)
+    finally:
+        os.unlink(path)
+
+
+def test_load_config_legacy_multi_document_raises():
+    """A multi-document file (the previous glide layout) is rejected with a
+    migration hint rather than silently misparsed."""
+    import pytest
+
+    # Two documents joined by `---`. Neither has any of the required keys
+    # at the top level — but the multi-doc check should fire first.
+    path = _write_temp_config("""\
+        trajectory:
+          name: legacy
+        netcdf_attributes: {}
+        ---
+        include:
+          flight: true
+    """)
+    try:
+        with pytest.raises(ValueError, match="multi-document"):
+            config.load_config(path)
     finally:
         os.unlink(path)

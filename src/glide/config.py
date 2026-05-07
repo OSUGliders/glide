@@ -8,6 +8,19 @@ from yaml import safe_load_all
 
 _log = logging.getLogger(__name__)
 
+# config.yml must contain exactly these top-level sections. Empty dicts are
+# allowed for sections you don't use (e.g. `qc: {}`), but missing sections are
+# an error so that typos and stale files fail loudly.
+_REQUIRED_CONFIG_SECTIONS = (
+    "trajectory",
+    "netcdf_attributes",
+    "include",
+    "instruments",
+    "qc",
+    "l1_variables",
+    "merged_variables",
+)
+
 # Helper functions
 
 
@@ -45,9 +58,15 @@ def _load_core() -> tuple[dict, dict, dict]:
     with open(core_file) as f:
         docs = [doc for doc in safe_load_all(f)]
 
-    core = docs[0] if docs else {}
-    flight = docs[1] if len(docs) > 1 else {}
-    thermo = docs[2] if len(docs) > 2 else {}
+    if len(docs) != 3:
+        raise ValueError(
+            f"Expected core.yml to contain exactly 3 YAML documents (core, "
+            f"flight_attitude, derived_thermo), but found {len(docs)}."
+        )
+
+    core = docs[0]
+    flight = docs[1]
+    thermo = docs[2]
 
     return core, flight, thermo
 
@@ -100,6 +119,41 @@ def _build_slocum_name_map(variables: dict) -> dict:
     return slocum_name_map
 
 
+def _parse_user_config(file: str) -> dict:
+    """Read the user config file and validate it has the required sections.
+
+    The file must be a single YAML document. Multi-document files (the
+    previous glide layout) are detected and rejected with a migration hint.
+    """
+    with open(file) as f:
+        all_docs = [d for d in safe_load_all(f)]
+
+    if len(all_docs) > 1:
+        raise ValueError(
+            f"{file} is a multi-document YAML file, but glide now expects a "
+            "single document with sections as top-level keys (trajectory, "
+            "netcdf_attributes, include, instruments, qc, l1_variables, "
+            "merged_variables). See assets/config.yml for the new layout."
+        )
+
+    parsed = all_docs[0] if all_docs else {}
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"{file} must contain a YAML mapping at the top level, "
+            f"got {type(parsed).__name__}."
+        )
+
+    missing = [s for s in _REQUIRED_CONFIG_SECTIONS if s not in parsed]
+    if missing:
+        raise ValueError(
+            f"{file} is missing required section(s): {missing}. "
+            f"Required sections are: {list(_REQUIRED_CONFIG_SECTIONS)}. "
+            "Empty sections are allowed (e.g. `qc: {}`); just include the key."
+        )
+
+    return parsed
+
+
 # Public functions
 
 
@@ -119,6 +173,8 @@ def load_config(file: str | None = None) -> dict:
         - variables: all variable definitions (core + optional + user)
         - slocum: mapping from Slocum names to output names
         - merged_variables: variables for higher-level processing
+        - instruments: per-deployment instrument metadata
+        - include: which optional suites are enabled
     """
     # Load core definitions
     core, flight, thermo = _load_core()
@@ -127,21 +183,23 @@ def load_config(file: str | None = None) -> dict:
     if file is None:
         from importlib import resources
 
+        _log.debug("No config file provided, using bundled default")
         file = str(resources.files("glide").joinpath("assets/config.yml"))
 
-    with open(file) as f:
-        docs = [doc for doc in safe_load_all(f)]
+    parsed = _parse_user_config(file)
 
-    # Parse user config documents
-    global_config = docs[0] if docs else {}
-    include_config = docs[1] if len(docs) > 1 else {}
-    qc_config = docs[2] if len(docs) > 2 else {}
-    l1_variables = docs[3] if len(docs) > 3 else {}
-    merged_variables = docs[4] if len(docs) > 4 else {}
-    instruments_config = docs[5] if len(docs) > 5 else {}
+    def _section(name: str) -> dict:
+        v = parsed.get(name)
+        return v if isinstance(v, dict) else {}
 
-    # Extract include toggles (default to True for backward compatibility)
-    include = include_config.get("include", {})
+    trajectory = _section("trajectory")
+    netcdf_attributes = _section("netcdf_attributes")
+    include = _section("include")
+    instruments = _section("instruments")
+    qc_overrides = _section("qc")
+    l1_vars = _section("l1_variables")
+    merged_vars = _section("merged_variables")
+
     include_flight = include.get("flight", True)
     include_thermo = include.get("thermo", True)
 
@@ -157,13 +215,9 @@ def load_config(file: str | None = None) -> dict:
         _log.debug("Including derived_thermo suite")
 
     # Apply QC overrides
-    qc_overrides = qc_config.get("qc", {}) if isinstance(qc_config, dict) else {}
     variables = _apply_qc_overrides(variables, qc_overrides)
 
     # Add user L1 variables
-    l1_vars = (
-        l1_variables.get("l1_variables", {}) if isinstance(l1_variables, dict) else {}
-    )
     for var_name, var_spec in l1_vars.items():
         if var_name in variables:
             _log.warning("L1 variable '%s' conflicts with core variable", var_name)
@@ -182,22 +236,15 @@ def load_config(file: str | None = None) -> dict:
                 if isinstance(val, datetime):
                     variables["time"]["CF"][attr] = _ensure_utc(val).timestamp()
 
-    # Extract merged variables
-    merged_vars = (
-        merged_variables.get("merged_variables", {})
-        if isinstance(merged_variables, dict)
-        else {}
-    )
-
-    # Extract instruments
-    instruments = (
-        instruments_config.get("instruments", {})
-        if isinstance(instruments_config, dict)
-        else {}
-    )
+    # The legacy `globals` key bundles trajectory + netcdf_attributes for
+    # downstream code that still expects them under one umbrella.
+    globals_block = {
+        "trajectory": trajectory,
+        "netcdf_attributes": netcdf_attributes,
+    }
 
     config = dict(
-        globals=global_config,
+        globals=globals_block,
         variables=variables,
         slocum=slocum_name_map,
         merged_variables=merged_vars,
