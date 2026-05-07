@@ -2,18 +2,24 @@
 
 Slocum underwater glider processing command line interface. 
 
-glide produces quality controlled L2 and L3 datasets from real-time and delayed-time Slocum glider data. It can generate datasets that meet [IOOS Glider DAC](https://gliders.ioos.us/) standards. It requires that data are first converted to netCDF or csv using [`dbd2netcdf`](github.com/OSUGliders/dbd2netcdf) (or `dbd2csv`), a very fast Dinkum binary conversion tool. 
+glide produces quality controlled L2 and L3 datasets from real-time and delayed-time Slocum glider data. It can generate datasets that meet [IOOS Glider DAC](https://gliders.ioos.us/) standards. It requires that data are first converted to netCDF or csv using [`dbd2netcdf`](github.com/OSUGliders/dbd2netcdf) (or `dbd2csv`), a very fast Dinkum binary conversion tool. Designed to be re-run on the full concatenated deployment dataset at every surfacing.
 
 Our definitions of data processing levels are guided by [NASA](https://www.earthdata.nasa.gov/learn/earth-observation-data-basics/data-processing-levels), the [Spray data](https://spraydata.ucsd.edu/data-access), and our own experiences working with gliders. We define the following levels:
 
 * **L0**: Binary files produced by Slocum gliders include `.dbd`, `.sbd`, `.ebd`, `.tbd` or their compressed counterparts `.dcd`, ... etc. 
 * **L1**: NetCDF or csv timeseries of flight and science data generated using `dbd2netcdf`. Usually named `glidername.dbd.nc` and `glidername.ebd.nc` or something similar. No quality control is performed. Data have the same units as in masterdata.
-* **L2**: Variable units are converted to oceanographic standards. Basic quality controls are applied. Some missing data are interpolated. Dead reckoned GPS positions are adjusted using surface GPS fixes. Thermodynamic variables are derived. Profiles are identified and tagged. Science and flight variables tagged in the configuration file are merged into a single file. 
+* **L2**: Variable units are converted to oceanographic standards. Basic quality controls are applied. Some missing data are interpolated. Dead reckoned GPS positions are adjusted using surface GPS fixes; valid GPS fixes are also written on a dedicated `time_gps` dimension. Thermodynamic variables are derived. Profiles are identified and tagged with `profile_id`. Depth-averaged velocity is reported on a `time_uv` dimension. Science and flight variables specified in the configuration file are merged into a single file.
 * **L3**: The L2 data are binned in depth and separated into profiles. Optionally, MicroRider data processed using [`q2netcdf`](github.com/OSUGliders/q2netcdf) may also be merged.
 
 Additionally, we provide the following intermediate processing outputs that may be useful for debugging issues:
 
 * **L1B**: The L1 data are parsed and basic quality control is performed but science and flight data are not merged.
+
+## Workflow note: concatenate first
+
+`glide` is designed to be run on the **full concatenated dataset** for a deployment, not on individual segment files as they arrive. Use `dbd2netcdf` (which is fast — written in C) to merge all `*.sbd`/`*.dbd` and `*.tbd`/`*.ebd` files into single concatenated L1 files, then run `glide l2` on those.
+
+Re-running `glide l2` is cheap and idempotent — the recommended pattern is to re-concatenate and re-run after every surfacing. This avoids the gaps that arise when velocity, GPS, or other state is reported only at the next surfacing. It is especially important for IOOS DAC submission (`--ioos`), where per-profile files are only emitted once their depth-averaged velocity has been reported.
 
 ## Installation
 
@@ -27,8 +33,8 @@ pipx install git+https://github.com/OSUGliders/glide
 
 ```mermaid
 flowchart TD;
-    sbd[L0 .sbd/.dbd] -->|dbd2netcdf| l1sbd[L1 .sbd.nc];
-    tbd[L0 .tbd/.ebd] -->|dbd2netcdf| l1tbd[L1 .tbd.nc];
+    sbd[L0 flight: .sbd /.dbd] -->|dbd2netcdf| l1sbd[L1 flight: .sbd.nc];
+    tbd[L0 science: .tbd /.ebd] -->|dbd2netcdf| l1tbd[L1 science: .tbd.nc];
     l1sbd --- C[ ]:::empty;
     l1tbd --- C;
     C -->|glide l2| l2[L2 .l2.nc];
@@ -67,20 +73,35 @@ To create a hotel file
 glide hot glidername.l2.nc -o glidername.hot.mat
 ```
 
-To extract the valid or interpolated location data into a CSV file
+To extract location data to CSV (interpolated, dense) or just the surface fixes (sparse, raw):
 
 ```
 glide gps glidername.l2.nc -o glidername.gps.csv
+glide gps glidername.l2.nc -o glidername.fixes.csv --fixes
 ```
+
+### IOOS Glider DAC submission
+
+Add `--ioos` to `glide l2` to additionally emit one NGDAC v2-compliant NetCDF file per profile (one descent or one ascent) into the given directory:
+
+```
+glide l2 glider.sbd.nc glider.tbd.nc -o glider.l2.nc \
+    --ioos ./dac/ -g glidername -c glidername.config.yml
+```
+
+A profile is emitted only when its containing surface-to-surface segment has a finite depth-averaged velocity — i.e., the closing surfacing has reported. Profiles still awaiting that surfacing are skipped and will be emitted on a future re-run with more concatenated data. Existing files are skipped (the filename encodes the profile start time); pass `--force` to overwrite.
+
+Per-deployment instrument metadata (CTD make/model/serial, calibration dates, etc.) goes in the `instruments:` section of `config.yml` and is emitted as scalar variables in each profile file.
 
 ## Quality control
 
-We currently apply the following QC during L1 -> L2 processing:
+During L1 → L2 processing we currently:
 
-* Drop missing or repeated timestamps. 
-* Check data are within `valid_min` and `valid_max` limits specified in the configuration file.
-* Interpolation of missing dead reckoned location.
-* Linearly adjust dead reckoned longitude and latitude estimates between surface fixes. 
+* Drop missing or repeated timestamps.
+* Check data are within `valid_min` and `valid_max` limits from the config.
+* Interpolate missing dead-reckoned position; linearly adjust between surface fixes.
+* Identify dive/climb profiles from pressure, and assign surface state from GPS fix proximity.
+* Track per-variable QC flags (`*_qc`) for variables tagged `track_qc` in core.yml, including for variables interpolated across the science/flight merge.
 
 We plan to implement more of the [standard IOOS QC methods](https://cdn.ioos.noaa.gov/media/2017/12/Manual-for-QC-of-Glider-Data_05_09_16.pdf) in the future.
 
