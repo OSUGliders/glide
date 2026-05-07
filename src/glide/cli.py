@@ -10,7 +10,7 @@ import netCDF4 as nc
 import typer
 from typing_extensions import Annotated
 
-from . import ancillery, config, hotel, process_l1, process_l2, process_l3
+from . import ancillery, config, gliderdac, hotel, process_l1, process_l2, process_l3
 
 _log = logging.getLogger(__name__)
 
@@ -195,12 +195,13 @@ def l2(
 
     if ioos_dir is not None:
         name = glider_name or conf["globals"]["trajectory"]["name"].split("_")[-1]
-        process_l1.emit_ioos_profiles(
+        gliderdac.emit_ioos_profiles(
             out,
             ioos_dir,
             name,
             instruments=conf.get("instruments", {}),
             force=force,
+            ngdac=conf.get("ngdac"),
         )
 
     if riot_csv:

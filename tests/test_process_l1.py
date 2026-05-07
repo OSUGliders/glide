@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+import glide.gliderdac as gd
 import glide.process_l1 as pl1
 import glide.qc as qc
 from glide.config import load_config
@@ -619,12 +620,13 @@ def _make_synthetic_l2_ds(
 
 def test_emit_ioos_profiles_writes_scalar_velocity(tmp_path) -> None:
     """A profile with finite velocity is emitted as an NGDAC-shaped scalar file."""
+    config = load_config()
     ds = _make_synthetic_l2_ds(
         profile_id=np.array([-1, 1, 1, 1, -1, -1], dtype="i4"),
         state=np.array([0, 1, 1, 2, 0, 0], dtype="i1"),
     )
 
-    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    written = gd.emit_ioos_profiles(ds, tmp_path, "test_glider", ngdac=config["ngdac"])
 
     assert len(written) == 1
     out = xr.open_dataset(written[0])
@@ -648,6 +650,7 @@ def test_emit_ioos_profiles_writes_scalar_velocity(tmp_path) -> None:
 
 def test_emit_ioos_profiles_skips_when_velocity_nan(tmp_path) -> None:
     """A profile in a segment with NaN u/v is skipped (no file written)."""
+    config = load_config()
     ds = _make_synthetic_l2_ds(
         profile_id=np.array([-1, 1, 1, -1], dtype="i4"),
         state=np.array([0, 1, 2, 0], dtype="i1"),
@@ -656,7 +659,7 @@ def test_emit_ioos_profiles_skips_when_velocity_nan(tmp_path) -> None:
         t_uv=15.0,
     )
 
-    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    written = gd.emit_ioos_profiles(ds, tmp_path, "test_glider", ngdac=config["ngdac"])
 
     assert written == []
     assert list(tmp_path.glob("*.nc")) == []
@@ -664,6 +667,7 @@ def test_emit_ioos_profiles_skips_when_velocity_nan(tmp_path) -> None:
 
 def test_emit_ioos_profiles_idempotent(tmp_path) -> None:
     """Re-running with the same data does not write new files."""
+    config = load_config()
     ds = _make_synthetic_l2_ds(
         profile_id=np.array([-1, 1, 1, -1], dtype="i4"),
         state=np.array([0, 1, 2, 0], dtype="i1"),
@@ -672,14 +676,16 @@ def test_emit_ioos_profiles_idempotent(tmp_path) -> None:
         t_uv=15.0,
     )
 
-    first = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    first = gd.emit_ioos_profiles(ds, tmp_path, "test_glider", ngdac=config["ngdac"])
     assert len(first) == 1
 
-    second = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    second = gd.emit_ioos_profiles(ds, tmp_path, "test_glider", ngdac=config["ngdac"])
     assert second == []
     assert len(list(tmp_path.glob("*.nc"))) == 1
 
-    forced = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider", force=True)
+    forced = gd.emit_ioos_profiles(
+        ds, tmp_path, "test_glider", force=True, ngdac=config["ngdac"]
+    )
     assert len(forced) == 1
     assert len(list(tmp_path.glob("*.nc"))) == 1
 
@@ -687,6 +693,7 @@ def test_emit_ioos_profiles_idempotent(tmp_path) -> None:
 def test_emit_ioos_profiles_writes_ngdac_structural_vars(tmp_path) -> None:
     """platform, crs, profile_time, profile_lat, profile_lon, and configured
     instrument scalars are all written into each emitted file."""
+    config = load_config()
     ds = _make_synthetic_l2_ds(
         profile_id=np.array([-1, 1, 1, 1, -1, -1], dtype="i4"),
         state=np.array([0, 1, 1, 2, 0, 0], dtype="i1"),
@@ -712,8 +719,12 @@ def test_emit_ioos_profiles_writes_ngdac_structural_vars(tmp_path) -> None:
         },
     }
 
-    written = pl1.emit_ioos_profiles(
-        ds, tmp_path, "synthglider", instruments=instruments
+    written = gd.emit_ioos_profiles(
+        ds,
+        tmp_path,
+        "synthglider",
+        instruments=instruments,
+        ngdac=config["ngdac"],
     )
     assert len(written) == 1
     out = xr.open_dataset(written[0])
@@ -751,6 +762,7 @@ def test_emit_ioos_profiles_writes_ngdac_structural_vars(tmp_path) -> None:
 
 def test_emit_ioos_profiles_yo_yo_shares_time_uv(tmp_path) -> None:
     """Profiles in the same segment share time_uv (canonical NGDAC grouping)."""
+    config = load_config()
     # surface, dive, climb, dive, climb, surface — 4 profiles in one segment
     ds = _make_synthetic_l2_ds(
         profile_id=np.array([-1, 1, 2, 3, 4, -1], dtype="i4"),
@@ -760,7 +772,7 @@ def test_emit_ioos_profiles_yo_yo_shares_time_uv(tmp_path) -> None:
         t_uv=25.0,
     )
 
-    written = pl1.emit_ioos_profiles(ds, tmp_path, "test_glider")
+    written = gd.emit_ioos_profiles(ds, tmp_path, "test_glider", ngdac=config["ngdac"])
     assert len(written) == 4
 
     time_uvs = []
