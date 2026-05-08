@@ -6,6 +6,14 @@ from profinder import find_profiles
 
 _log = logging.getLogger(__name__)
 
+_STATE_ATTRS = dict(
+    long_name="Glider state",
+    flag_values=np.array([-1, 0, 1, 2, 3], "b"),
+    flag_meanings="unknown surface dive climb drift",
+    valid_max=np.int8(3),
+    valid_min=np.int8(-1),
+)
+
 
 def _detect_drift(
     pressure: np.ndarray,
@@ -102,27 +110,24 @@ def _absorb_apex_unknowns(
     for s, e in zip(starts, ends):
         if (e - s) > max_samples or s == 0 or e >= n:
             continue
-        prev, nxt = state[s - 1], state[e]
+        prev, nxt = int(state[s - 1]), int(state[e])
+        if {prev, nxt} != {1, 2}:
+            continue
         p = pressure[s:e]
         finite = np.isfinite(p)
         if not finite.any() or float(np.min(p[finite])) < surface_pressure:
             continue
-        if prev == 1 and nxt == 2:
-            split = s + int(np.argmax(np.where(finite, p, -np.inf))) + 1
-            state[s:split] = 1
-            dive_id[s:split] = dive_id[s - 1]
-            profile_id[s:split] = profile_id[s - 1]
-            state[split:e] = 2
-            climb_id[split:e] = climb_id[e]
-            profile_id[split:e] = profile_id[e]
-        elif prev == 2 and nxt == 1:
-            split = s + int(np.argmin(np.where(finite, p, np.inf))) + 1
-            state[s:split] = 2
-            climb_id[s:split] = climb_id[s - 1]
-            profile_id[s:split] = profile_id[s - 1]
-            state[split:e] = 1
-            dive_id[split:e] = dive_id[e]
-            profile_id[split:e] = profile_id[e]
+        # dive→climb splits at max (extremum is positive); climb→dive at min.
+        fill, extreme = (-np.inf, np.argmax) if prev == 1 else (np.inf, np.argmin)
+        split = s + int(extreme(np.where(finite, p, fill))) + 1
+        pre_id = dive_id if prev == 1 else climb_id
+        post_id = climb_id if nxt == 2 else dive_id
+        state[s:split] = prev
+        state[split:e] = nxt
+        pre_id[s:split] = pre_id[s - 1]
+        post_id[split:e] = post_id[e]
+        profile_id[s:split] = profile_id[s - 1]
+        profile_id[split:e] = profile_id[e]
 
 
 def _absorb_post_drift_transients(
@@ -265,33 +270,15 @@ def get_profiles(
     climb_id[drift_mask] = -1
     profile_id[drift_mask] = -1
 
-    _absorb_post_drift_transients(
-        state, dive_id, climb_id, profile_id, drift_mask, dt_s, min_surface_time
-    )
-    _absorb_apex_unknowns(
-        state,
-        dive_id,
-        climb_id,
-        profile_id,
-        ds.pressure.values,
-        dt_s,
-        min_surface_time,
-    )
+    ids = (state, dive_id, climb_id, profile_id)
+    _absorb_post_drift_transients(*ids, drift_mask, dt_s, min_surface_time)
+    _absorb_apex_unknowns(*ids, ds.pressure.values, dt_s, min_surface_time)
 
-    ds["dive_id"] = ("time", dive_id, dict(_FillValue=np.int32(-1)))
-    ds["climb_id"] = ("time", climb_id, dict(_FillValue=np.int32(-1)))
-    ds["profile_id"] = ("time", profile_id, dict(_FillValue=np.int32(-1)))
-    ds["state"] = (
-        "time",
-        state,
-        dict(
-            long_name="Glider state",
-            flag_values=np.array([-1, 0, 1, 2, 3], "b"),
-            flag_meanings="unknown surface dive climb drift",
-            valid_max=np.int8(3),
-            valid_min=np.int8(-1),
-        ),
-    )
+    fill = dict(_FillValue=np.int32(-1))
+    ds["dive_id"] = ("time", dive_id, fill)
+    ds["climb_id"] = ("time", climb_id, fill)
+    ds["profile_id"] = ("time", profile_id, fill)
+    ds["state"] = ("time", state, _STATE_ATTRS)
     return ds
 
 

@@ -1061,6 +1061,14 @@ def _make_state_arrays(n: int) -> tuple[np.ndarray, ...]:
     )
 
 
+def _set_profile(arrs, slc, state_val, id_val, pid_val):
+    """Set state, the matching dive_id or climb_id, and profile_id over slc."""
+    state, dive_id, climb_id, profile_id = arrs
+    state[slc] = state_val
+    (dive_id if state_val == 1 else climb_id)[slc] = id_val
+    profile_id[slc] = pid_val
+
+
 @pytest.mark.parametrize("dt_s", [1.0, 15.0], ids=["post_recovery_1s", "realtime_15s"])
 def test_get_profiles_drift_at_depth(dt_s: float) -> None:
     """Drift labelled state=3; post-drift climb spans the full water column
@@ -1128,28 +1136,20 @@ def test_get_profiles_drift_x_hover_active() -> None:
 
 def test_absorb_post_drift_transients() -> None:
     """Brief dive/unknown segments between drift and climb are folded into climb."""
-    state, dive_id, climb_id, profile_id = _make_state_arrays(50)
+    arrs = _make_state_arrays(50)
+    state, dive_id, climb_id, profile_id = arrs
     drift_mask = np.zeros(50, dtype=bool)
-    state[5:15] = 1
-    dive_id[5:15] = 1
-    profile_id[5:15] = 1
+    _set_profile(arrs, slice(5, 15), 1, 1, 1)  # main dive
     state[15:30] = 3
-    drift_mask[15:30] = True
-    state[30:32] = 1
-    dive_id[30:32] = 2
-    profile_id[30:32] = 2  # spurious dive
+    drift_mask[15:30] = True  # drift
+    _set_profile(arrs, slice(30, 32), 1, 2, 2)  # spurious dive
     # state[32:34] left as -1 (unknown gap)
-    state[34:48] = 2
-    climb_id[34:48] = 1
-    profile_id[34:48] = 3
+    _set_profile(arrs, slice(34, 48), 2, 1, 3)  # real climb
 
-    prof._absorb_post_drift_transients(
-        state, dive_id, climb_id, profile_id, drift_mask, 10.0, 180.0
-    )
-    assert np.all(state[30:34] == 2)
-    assert np.all(climb_id[30:34] == 1)
-    assert np.all(profile_id[30:34] == 3)
-    assert np.all(dive_id[30:34] == -1)
+    prof._absorb_post_drift_transients(*arrs, drift_mask, 10.0, 180.0)
+
+    assert np.all(state[30:34] == 2) and np.all(climb_id[30:34] == 1)
+    assert np.all(profile_id[30:34] == 3) and np.all(dive_id[30:34] == -1)
     assert (
         np.all(state[5:15] == 1)
         and np.all(state[15:30] == 3)
@@ -1159,64 +1159,46 @@ def test_absorb_post_drift_transients() -> None:
 
 def test_absorb_apex_unknowns_splits_at_max_pressure() -> None:
     """Short unknown gap between dive and climb is split at the pressure max."""
-    state, dive_id, climb_id, profile_id = _make_state_arrays(30)
+    arrs = _make_state_arrays(30)
+    state, dive_id, climb_id, profile_id = arrs
     pressure = np.zeros(30)
-    state[5:13] = 1
-    dive_id[5:13] = 1
-    profile_id[5:13] = 1
+    _set_profile(arrs, slice(5, 13), 1, 1, 1)
     pressure[5:13] = np.linspace(10, 80, 8)
     pressure[13:17] = [85, 88, 90, 87]  # apex at index 15
-    state[17:25] = 2
-    climb_id[17:25] = 1
-    profile_id[17:25] = 2
+    _set_profile(arrs, slice(17, 25), 2, 1, 2)
     pressure[17:25] = np.linspace(85, 5, 8)
 
-    prof._absorb_apex_unknowns(
-        state, dive_id, climb_id, profile_id, pressure, 10.0, 180.0, 2.0
-    )
-    assert (
-        np.all(state[13:16] == 1)
-        and np.all(dive_id[13:16] == 1)
-        and np.all(profile_id[13:16] == 1)
-    )
+    prof._absorb_apex_unknowns(*arrs, pressure, 10.0, 180.0, 2.0)
+
+    assert np.all(state[13:16] == 1) and np.all(dive_id[13:16] == 1)
+    assert np.all(profile_id[13:16] == 1)
     assert state[16] == 2 and climb_id[16] == 1 and profile_id[16] == 2
 
 
 def test_absorb_apex_unknowns_climb_to_dive_yo_top() -> None:
     """Short underwater gap between climb→dive (yo-top) is split at the
     pressure minimum: pre-min → climb, post-min → dive."""
-    state, dive_id, climb_id, profile_id = _make_state_arrays(30)
+    arrs = _make_state_arrays(30)
+    state, dive_id, climb_id, profile_id = arrs
     pressure = np.zeros(30)
-    state[5:13] = 2
-    climb_id[5:13] = 1
-    profile_id[5:13] = 1
+    _set_profile(arrs, slice(5, 13), 2, 1, 1)
     pressure[5:13] = np.linspace(80, 50, 8)
     pressure[13:17] = [48, 45, 47, 50]  # yo-top min at index 14
-    state[17:25] = 1
-    dive_id[17:25] = 2
-    profile_id[17:25] = 2
+    _set_profile(arrs, slice(17, 25), 1, 2, 2)
     pressure[17:25] = np.linspace(55, 200, 8)
 
-    prof._absorb_apex_unknowns(
-        state, dive_id, climb_id, profile_id, pressure, 10.0, 180.0, 2.0
-    )
-    # Up to and including the min → climb
-    assert (
-        np.all(state[13:15] == 2)
-        and np.all(climb_id[13:15] == 1)
-        and np.all(profile_id[13:15] == 1)
-    )
-    # After the min → dive
-    assert (
-        np.all(state[15:17] == 1)
-        and np.all(dive_id[15:17] == 2)
-        and np.all(profile_id[15:17] == 2)
-    )
+    prof._absorb_apex_unknowns(*arrs, pressure, 10.0, 180.0, 2.0)
+
+    assert np.all(state[13:15] == 2) and np.all(climb_id[13:15] == 1)
+    assert np.all(profile_id[13:15] == 1)
+    assert np.all(state[15:17] == 1) and np.all(dive_id[15:17] == 2)
+    assert np.all(profile_id[15:17] == 2)
 
 
 def test_absorb_apex_unknowns_skips_surface_gap() -> None:
     """A gap that goes shallow (glider surfaced) is left for the surface classifier."""
-    state, dive_id, climb_id, profile_id = _make_state_arrays(30)
+    arrs = _make_state_arrays(30)
+    state, _, _, _ = arrs
     pressure = np.zeros(30)
     state[5:10] = 1
     pressure[5:10] = np.linspace(10, 80, 5)
@@ -1227,27 +1209,20 @@ def test_absorb_apex_unknowns_skips_surface_gap() -> None:
     pressure[17:22] = np.linspace(1, 60, 5)
     before = state.copy()
 
-    prof._absorb_apex_unknowns(
-        state, dive_id, climb_id, profile_id, pressure, 10.0, 180.0, 2.0
-    )
+    prof._absorb_apex_unknowns(*arrs, pressure, 10.0, 180.0, 2.0)
     assert np.array_equal(state, before)
 
 
 def test_absorb_post_drift_transients_does_not_swallow_real_dive() -> None:
     """A long dive (>max_transient_duration) between drift and climb is not absorbed."""
-    state, dive_id, climb_id, profile_id = _make_state_arrays(60)
+    arrs = _make_state_arrays(60)
+    state, _, _, _ = arrs
     drift_mask = np.zeros(60, dtype=bool)
     state[5:15] = 3
     drift_mask[5:15] = True
-    state[15:35] = 1
-    dive_id[15:35] = 1
-    profile_id[15:35] = 1  # 200 s > 180 s
-    state[40:55] = 2
-    climb_id[40:55] = 1
-    profile_id[40:55] = 2
+    _set_profile(arrs, slice(15, 35), 1, 1, 1)  # 200 s > 180 s
+    _set_profile(arrs, slice(40, 55), 2, 1, 2)
     before = state.copy()
 
-    prof._absorb_post_drift_transients(
-        state, dive_id, climb_id, profile_id, drift_mask, 10.0, 180.0
-    )
+    prof._absorb_post_drift_transients(*arrs, drift_mask, 10.0, 180.0)
     assert np.array_equal(state, before)
