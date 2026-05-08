@@ -87,9 +87,10 @@ def _absorb_apex_unknowns(
     max_gap_duration: float,
     surface_pressure: float = 2.0,
 ) -> None:
-    """Split short underwater unknown gaps between a dive and climb at the
-    pressure max: pre-max → dive, post-max → climb.  Skips gaps that go
-    shallow (left for the surface classifier) or are too long."""
+    """Split short underwater unknown gaps between adjacent profiles at the
+    pressure extremum.  Handles dive→climb (split at max: pre→dive, post→climb)
+    and climb→dive yo-tops (split at min: pre→climb, post→dive).  Skips gaps
+    that go shallow (left for the surface classifier) or are too long."""
     n = len(state)
     unknown = state == -1
     if not unknown.any():
@@ -101,19 +102,27 @@ def _absorb_apex_unknowns(
     for s, e in zip(starts, ends):
         if (e - s) > max_samples or s == 0 or e >= n:
             continue
-        if state[s - 1] != 1 or state[e] != 2:
-            continue
+        prev, nxt = state[s - 1], state[e]
         p = pressure[s:e]
         finite = np.isfinite(p)
         if not finite.any() or float(np.min(p[finite])) < surface_pressure:
             continue
-        split = s + int(np.argmax(np.where(finite, p, -np.inf))) + 1
-        state[s:split] = 1
-        dive_id[s:split] = dive_id[s - 1]
-        profile_id[s:split] = profile_id[s - 1]
-        state[split:e] = 2
-        climb_id[split:e] = climb_id[e]
-        profile_id[split:e] = profile_id[e]
+        if prev == 1 and nxt == 2:
+            split = s + int(np.argmax(np.where(finite, p, -np.inf))) + 1
+            state[s:split] = 1
+            dive_id[s:split] = dive_id[s - 1]
+            profile_id[s:split] = profile_id[s - 1]
+            state[split:e] = 2
+            climb_id[split:e] = climb_id[e]
+            profile_id[split:e] = profile_id[e]
+        elif prev == 2 and nxt == 1:
+            split = s + int(np.argmin(np.where(finite, p, np.inf))) + 1
+            state[s:split] = 2
+            climb_id[s:split] = climb_id[s - 1]
+            profile_id[s:split] = profile_id[s - 1]
+            state[split:e] = 1
+            dive_id[split:e] = dive_id[e]
+            profile_id[split:e] = profile_id[e]
 
 
 def _absorb_post_drift_transients(

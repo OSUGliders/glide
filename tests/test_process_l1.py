@@ -1182,6 +1182,38 @@ def test_absorb_apex_unknowns_splits_at_max_pressure() -> None:
     assert state[16] == 2 and climb_id[16] == 1 and profile_id[16] == 2
 
 
+def test_absorb_apex_unknowns_climb_to_dive_yo_top() -> None:
+    """Short underwater gap between climb→dive (yo-top) is split at the
+    pressure minimum: pre-min → climb, post-min → dive."""
+    state, dive_id, climb_id, profile_id = _make_state_arrays(30)
+    pressure = np.zeros(30)
+    state[5:13] = 2
+    climb_id[5:13] = 1
+    profile_id[5:13] = 1
+    pressure[5:13] = np.linspace(80, 50, 8)
+    pressure[13:17] = [48, 45, 47, 50]  # yo-top min at index 14
+    state[17:25] = 1
+    dive_id[17:25] = 2
+    profile_id[17:25] = 2
+    pressure[17:25] = np.linspace(55, 200, 8)
+
+    prof._absorb_apex_unknowns(
+        state, dive_id, climb_id, profile_id, pressure, 10.0, 180.0, 2.0
+    )
+    # Up to and including the min → climb
+    assert (
+        np.all(state[13:15] == 2)
+        and np.all(climb_id[13:15] == 1)
+        and np.all(profile_id[13:15] == 1)
+    )
+    # After the min → dive
+    assert (
+        np.all(state[15:17] == 1)
+        and np.all(dive_id[15:17] == 2)
+        and np.all(profile_id[15:17] == 2)
+    )
+
+
 def test_absorb_apex_unknowns_skips_surface_gap() -> None:
     """A gap that goes shallow (glider surfaced) is left for the surface classifier."""
     state, dive_id, climb_id, profile_id = _make_state_arrays(30)
