@@ -161,8 +161,6 @@ def get_profiles(
     flt: xr.Dataset | None = None,
     min_drift_duration: float = 600.0,
     drift_pressure_std: float = 2.0,
-    stall_tolerance: float = 180.0,
-    min_pressure_rate: float = 0.05,
 ) -> xr.Dataset:
     """Identify dive, climb, and drift profiles from a pressure time series.
 
@@ -185,14 +183,6 @@ def get_profiles(
     drift_pressure_std : float
         Rolling pressure std threshold (dbar) for the pressure-based drift
         detector (default 2.0).
-    stall_tolerance : float
-        Max stall/reversal duration (s) tolerated within a profile before
-        profinder terminates it (default 180 s).  Sampling-rate independent
-        — converted to profinder's per-sample `run_length`.
-    min_pressure_rate : float
-        Min vertical speed (dbar/s) for a sample to count toward
-        ascent/descent (default 0.05 ≈ 5 cm/s, well below normal glider
-        speeds of 10–20 cm/s).  Converted to per-sample `min_pressure_change`.
     """
     raw_diff = np.diff(ds.time.values)
     if np.issubdtype(raw_diff.dtype, np.timedelta64):
@@ -235,8 +225,6 @@ def get_profiles(
         pressure_masked,
         peaks_kwargs=peaks_kwargs,
         troughs_kwargs=troughs_kwargs,
-        run_length=max(2, round(stall_tolerance / dt_s)),
-        min_pressure_change=float(min_pressure_rate * dt_s),
         missing="drop",
     )
     _log.debug("Found %i profiles", len(profiles))
