@@ -1215,6 +1215,44 @@ def test_absorb_apex_unknowns_skips_surface_gap() -> None:
     assert np.array_equal(state, before)
 
 
+def test_absorb_pre_drift_transients() -> None:
+    """Brief climb/unknown samples between a dive and a drift (overshoot
+    recovery) are folded into the drift."""
+    arrs = _make_state_arrays(50)
+    state, dive_id, climb_id, profile_id = arrs
+    drift_mask = np.zeros(50, dtype=bool)
+    _set_profile(arrs, slice(5, 15), 1, 1, 1)  # dive (peak overshoot)
+    _set_profile(arrs, slice(15, 18), 2, 1, 2)  # brief recovery climb
+    state[18:20] = -1  # brief unknown
+    state[20:35] = 3
+    drift_mask[20:35] = True  # drift
+    _set_profile(arrs, slice(35, 45), 2, 2, 3)  # post-drift climb
+
+    prof._absorb_pre_drift_transients(*arrs, drift_mask, 10.0, 180.0)
+
+    # The recovery climb and unknown gap are now part of the drift
+    assert np.all(state[15:20] == 3)
+    assert np.all(climb_id[15:20] == -1) and np.all(dive_id[15:20] == -1)
+    assert np.all(profile_id[15:20] == -1)
+    # Surrounding dive and post-drift climb are unchanged
+    assert np.all(state[5:15] == 1) and np.all(state[35:45] == 2)
+
+
+def test_absorb_pre_drift_transients_does_not_swallow_long_climb() -> None:
+    """A long climb (>max_transient_duration) before a drift is not absorbed."""
+    arrs = _make_state_arrays(60)
+    state, _, _, _ = arrs
+    drift_mask = np.zeros(60, dtype=bool)
+    _set_profile(arrs, slice(0, 10), 1, 1, 1)
+    _set_profile(arrs, slice(10, 35), 2, 1, 2)  # 250 s > 180 s
+    state[35:50] = 3
+    drift_mask[35:50] = True
+    before = state.copy()
+
+    prof._absorb_pre_drift_transients(*arrs, drift_mask, 10.0, 180.0)
+    assert np.array_equal(state, before)
+
+
 def test_absorb_post_drift_transients_does_not_swallow_real_dive() -> None:
     """A long dive (>max_transient_duration) between drift and climb is not absorbed."""
     arrs = _make_state_arrays(60)

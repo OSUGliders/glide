@@ -81,6 +81,29 @@ def _detect_drift(
             drift[i:j] = True
         i = j
 
+    # The rolling-variance window misses the settling phase (overshoot
+    # recovery before, slow ascent start after).  Expand each drift run to
+    # absorb adjacent samples whose pressure is close to the drift mean.
+    # A real climb/dive moves through drift depth quickly so the expansion
+    # stops shortly after crossing it.
+    if drift.any():
+        diff_d = np.diff(drift.astype(int), prepend=0, append=0)
+        run_starts, run_ends = np.where(diff_d == 1)[0], np.where(diff_d == -1)[0]
+        tol = 2 * pressure_std_threshold
+        for s, e in zip(run_starts, run_ends):
+            mean_p = float(np.nanmean(pressure[s:e]))
+            while (
+                s > 0
+                and np.isfinite(pressure[s - 1])
+                and abs(pressure[s - 1] - mean_p) < tol
+            ):
+                s -= 1
+            while (
+                e < n and np.isfinite(pressure[e]) and abs(pressure[e] - mean_p) < tol
+            ):
+                e += 1
+            drift[s:e] = True
+
     _log.debug("Drift: %d points from pressure detector", int(drift.sum()))
     return drift
 
@@ -128,6 +151,42 @@ def _absorb_apex_unknowns(
         post_id[split:e] = post_id[e]
         profile_id[s:split] = profile_id[s - 1]
         profile_id[split:e] = profile_id[e]
+
+
+def _absorb_pre_drift_transients(
+    state: np.ndarray,
+    dive_id: np.ndarray,
+    climb_id: np.ndarray,
+    profile_id: np.ndarray,
+    drift_mask: np.ndarray,
+    dt_s: float,
+    max_transient_duration: float,
+) -> None:
+    """Fold brief climb/unknown segments between a dive end and a drift start
+    into that drift.  This is the dive overshoot recovery: the glider arrives
+    past target, briefly recovers upward, then settles into hover.  Without
+    this pass the recovery becomes a tiny climb profile in L3."""
+    n = len(state)
+    if not drift_mask.any():
+        return
+    diff = np.diff(drift_mask.astype(int), prepend=0, append=0)
+    drift_starts = np.where(diff == 1)[0]
+    window = max(2, round(max_transient_duration / dt_s))
+
+    for ds_ in drift_starts:
+        if ds_ == 0:
+            continue
+        start = max(0, ds_ - window)
+        i = ds_ - 1
+        while i >= start and (state[i] == 2 or state[i] == -1):
+            i -= 1
+        # Only absorb when bounded on the left by a dive within the window
+        if i < start or state[i] != 1:
+            continue
+        state[i + 1 : ds_] = 3
+        dive_id[i + 1 : ds_] = -1
+        climb_id[i + 1 : ds_] = -1
+        profile_id[i + 1 : ds_] = -1
 
 
 def _absorb_post_drift_transients(
@@ -271,6 +330,7 @@ def get_profiles(
     profile_id[drift_mask] = -1
 
     ids = (state, dive_id, climb_id, profile_id)
+    _absorb_pre_drift_transients(*ids, drift_mask, dt_s, min_surface_time)
     _absorb_post_drift_transients(*ids, drift_mask, dt_s, min_surface_time)
     _absorb_apex_unknowns(*ids, ds.pressure.values, dt_s, min_surface_time)
 
