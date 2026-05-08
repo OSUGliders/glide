@@ -1051,7 +1051,9 @@ def _make_drift_at_depth_dataset(dt_s: float) -> tuple[xr.Dataset, float, float,
     )
 
 
-def _make_state_arrays(n: int) -> tuple[np.ndarray, ...]:
+def _make_state_arrays(
+    n: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Allocate (state, dive_id, climb_id, profile_id) all initialised to -1."""
     return (
         np.full(n, -1, dtype="b"),
