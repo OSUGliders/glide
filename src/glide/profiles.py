@@ -225,6 +225,11 @@ def get_profiles(
         pressure_masked,
         peaks_kwargs=peaks_kwargs,
         troughs_kwargs=troughs_kwargs,
+        # Real glider pressure has per-second sensor bobbing (positive Δp every
+        # ~5 samples) that breaks profinder's default 4-sample-all-ascent
+        # confirmation, terminating the climb tens of dbar above the surface.
+        # 2 samples is loose enough to find ascent windows through the bobbing.
+        run_length=2,
         missing="drop",
     )
     _log.debug("Found %i profiles", len(profiles))
