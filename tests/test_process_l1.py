@@ -375,19 +375,124 @@ def test_assign_surface_state_pressure_gate() -> None:
 
 
 def test_assign_surface_state_no_flight_data() -> None:
-    """Test that assign_surface_state handles missing flight data gracefully."""
+    """Without flight data the GPS-proximity check is skipped, but shallow
+    unknown segments are still classified as surface by the pressure-only pass."""
     n = 20
     state = np.full(n, -1, dtype="b")
     state[5:15] = 1
+    pressure = np.full(n, 0.5)
+    pressure[5:15] = 50.0  # dive at depth
 
     ds = xr.Dataset(
-        {"state": ("time", state)},
+        {"state": ("time", state), "pressure": ("time", pressure)},
         coords={"time": np.arange(n, dtype=float)},
     )
 
-    # No flight data - should return unchanged
-    result = prof.assign_surface_state(ds, flt=None)
-    assert np.array_equal(result.state.values, state)
+    result = prof.assign_surface_state(ds, flt=None, surface_pressure=2.0)
+
+    assert np.all(result.state.values[5:15] == 1), "Dive states unchanged"
+    assert np.all(result.state.values[:5] == 0), "Pre-dive shallow → surface"
+    assert np.all(result.state.values[15:] == 0), "Post-dive shallow → surface"
+
+
+def test_assign_surface_state_pre_first_dive_and_post_last_climb() -> None:
+    """Time before the first dive and after the last climb is classified as
+    surface when pressure stays below surface_pressure."""
+    n = 50
+    state = np.full(n, -1, dtype="b")
+    state[10:20] = 1  # dive
+    state[20:30] = 2  # climb
+    pressure = np.full(n, 0.3)
+    pressure[10:20] = np.linspace(0.3, 80, 10)
+    pressure[20:30] = np.linspace(80, 0.3, 10)
+
+    ds = xr.Dataset(
+        {"state": ("time", state), "pressure": ("time", pressure)},
+        coords={"time": np.arange(n, dtype=float)},
+    )
+
+    result = prof.assign_surface_state(ds, flt=None, surface_pressure=2.0)
+
+    assert np.all(result.state.values[:10] == 0), "Pre-first-dive → surface"
+    assert np.all(result.state.values[30:] == 0), "Post-last-climb → surface"
+    assert np.all(result.state.values[10:20] == 1)
+    assert np.all(result.state.values[20:30] == 2)
+
+
+def test_assign_surface_state_all_nan_pressure_is_surface() -> None:
+    """Surface segments where the science pressure sensor is out of water
+    (all NaN) must still be classified as surface."""
+    n = 30
+    state = np.full(n, -1, dtype="b")
+    state[5:15] = 1  # dive
+    state[15:20] = 2  # climb
+    pressure = np.full(n, np.nan)
+    pressure[5:15] = np.linspace(2, 80, 10)
+    pressure[15:20] = np.linspace(80, 2, 5)
+    # Indices 0–4 and 20–29 have NaN pressure (surface, sensor out of water)
+
+    ds = xr.Dataset(
+        {"state": ("time", state), "pressure": ("time", pressure)},
+        coords={"time": np.arange(n, dtype=float)},
+    )
+
+    result = prof.assign_surface_state(ds, flt=None, surface_pressure=2.0)
+
+    assert np.all(result.state.values[:5] == 0), "Pre-dive all-NaN → surface"
+    assert np.all(result.state.values[20:] == 0), "Post-climb all-NaN → surface"
+    assert np.all(result.state.values[5:15] == 1)
+    assert np.all(result.state.values[15:20] == 2)
+
+
+def test_assign_surface_state_protects_apex_nan_gap() -> None:
+    """An all-NaN unknown gap sandwiched between a dive and a climb is the
+    underwater apex (the apex absorber couldn't split it because pressure
+    was missing).  It must NOT be reclassified as surface."""
+    n = 30
+    state = np.full(n, -1, dtype="b")
+    state[5:13] = 1  # dive
+    state[16:25] = 2  # climb
+    pressure = np.full(n, np.nan)
+    pressure[5:13] = np.linspace(2, 80, 8)
+    pressure[16:25] = np.linspace(80, 2, 9)
+    # Indices 13–15 NaN (sensor briefly missing at the apex)
+
+    ds = xr.Dataset(
+        {"state": ("time", state), "pressure": ("time", pressure)},
+        coords={"time": np.arange(n, dtype=float)},
+    )
+
+    result = prof.assign_surface_state(ds, flt=None, surface_pressure=2.0)
+
+    assert np.all(result.state.values[13:16] == -1), (
+        "Apex NaN gap must stay unknown, not flip to surface"
+    )
+    assert np.all(result.state.values[5:13] == 1)
+    assert np.all(result.state.values[16:25] == 2)
+
+
+def test_assign_surface_state_keeps_aborted_dive_unknown() -> None:
+    """An unknown segment that contains a partial dive (pressure exceeds
+    surface_pressure) must not be reclassified as surface."""
+    n = 30
+    state = np.full(n, -1, dtype="b")
+    state[20:25] = 2  # climb
+    pressure = np.full(n, 0.3)
+    # Aborted dive between samples 5–15: pressure briefly reaches 4 dbar
+    pressure[5:15] = np.array([1.0, 2.0, 3.0, 4.0, 4.0, 4.0, 3.0, 2.0, 1.0, 0.5])
+    pressure[20:25] = np.linspace(40, 0.3, 5)
+
+    ds = xr.Dataset(
+        {"state": ("time", state), "pressure": ("time", pressure)},
+        coords={"time": np.arange(n, dtype=float)},
+    )
+
+    result = prof.assign_surface_state(ds, flt=None, surface_pressure=2.0)
+
+    # The whole pre-climb segment contains a sample > surface_pressure → stays unknown
+    assert np.all(result.state.values[:20] == -1)
+    # Post-climb stays surface (pressure shallow throughout)
+    assert np.all(result.state.values[25:] == 0)
 
 
 def test_add_velocity_groups_by_velocity_reports() -> None:
@@ -1002,23 +1107,88 @@ def test_get_profiles_drift_at_depth(dt_s: float) -> None:
     assert 3 in result.state.attrs["flag_values"]
 
 
-def test_get_profiles_drift_x_target_hover_depth() -> None:
-    """x_target_hover_depth in raw flight data takes precedence over pressure-based
-    drift detection and marks the exact drift period as state=3."""
+@pytest.mark.parametrize(
+    "dt_s",
+    [1.0, 15.0],
+    ids=["post_recovery_1s", "realtime_15s"],
+)
+def test_get_profiles_climb_with_stall(dt_s: float) -> None:
+    """A brief stall during the climb (glider hangs at ~20 dbar and drifts a
+    few dbar back down before resuming the ascent) must not split the climb
+    in two.  The stall_tolerance default rides over the reversal at both
+    sampling rates because it is specified in seconds, not samples."""
+    t_surface = 60.0
+    t_dive = 800.0
+    t_climb_pre_stall = 600.0  # 100 → 20 dbar
+    t_stall = 120.0  # hangs at 20–22 dbar for 2 min (within 3 min tolerance)
+    t_climb_post_stall = 400.0  # 22 → 0 dbar
+    t_total = (
+        t_surface + t_dive + t_climb_pre_stall + t_stall + t_climb_post_stall + 60.0
+    )
+
+    t = np.arange(0.0, t_total, dt_s)
+    p = np.full(len(t), 0.5)
+
+    t0_dive = t_surface
+    t0_climb_pre = t0_dive + t_dive
+    t0_stall = t0_climb_pre + t_climb_pre_stall
+    t0_climb_post = t0_stall + t_stall
+    t0_end = t0_climb_post + t_climb_post_stall
+
+    mask = (t >= t0_dive) & (t < t0_climb_pre)
+    p[mask] = 100.0 * (t[mask] - t0_dive) / t_dive
+
+    mask = (t >= t0_climb_pre) & (t < t0_stall)
+    p[mask] = 100.0 - 80.0 * (t[mask] - t0_climb_pre) / t_climb_pre_stall
+
+    # Stall: drift slowly back down from 20 to 22 dbar over 2 min
+    mask = (t >= t0_stall) & (t < t0_climb_post)
+    p[mask] = 20.0 + 2.0 * (t[mask] - t0_stall) / t_stall
+
+    mask = (t >= t0_climb_post) & (t < t0_end)
+    p[mask] = 22.0 * (1.0 - (t[mask] - t0_climb_post) / t_climb_post_stall)
+
+    # Leading NaN sidesteps a profinder edge case where valid_idx is undefined
+    # for NaN-free input.
+    p[0] = np.nan
+
+    ds = xr.Dataset({"pressure": ("time", p)}, coords={"time": t})
+
+    result = prof.get_profiles(ds, shallowest_profile=5.0, min_surface_time=180.0)
+
+    state = result.state.values
+    # The post-stall climb must be classified as climb, not unknown
+    post_stall_state = state[(t >= t0_climb_post) & (t < t0_end)]
+    assert (post_stall_state == 2).mean() > 0.7, (
+        f"Post-stall climb only {(post_stall_state == 2).mean():.1%} state=2 at dt_s={dt_s}"
+    )
+    # The whole climb (pre-stall + stall + post-stall) is one climb_id
+    climb_ids = np.unique(result.climb_id.values[result.climb_id.values >= 0])
+    assert len(climb_ids) == 1, f"Expected 1 climb, got {len(climb_ids)} at dt_s={dt_s}"
+
+
+def test_get_profiles_drift_x_hover_active() -> None:
+    """x_hover_active in raw flight data takes precedence over pressure-based
+    drift detection and marks the exact drift period as state=3.
+
+    The Slocum flight computer reports x_hover_active only on transitions
+    (1 when a hover starts, 0 when it ends, -127 missing otherwise); the
+    detector must forward-fill the most recent {0,1} report.
+    """
     dt_s = 15.0
     ds, _t_dive, t_drift_start, t_climb_start = _make_drift_at_depth_dataset(dt_s)
 
     time = ds.time.values
 
-    # Synthetic flight data at 4 s intervals with target hover depth set during drift
-    flt_time = np.arange(0.0, time[-1] + 4.0, 4.0)
-    hover_depth = np.full(len(flt_time), np.nan)
-    hover_depth[(flt_time >= t_drift_start) & (flt_time < t_climb_start)] = 100.0
+    # Sparse flight reports: 0 at start, 1 when hover begins, 0 when it ends.
+    # Mix in a -127 sentinel to confirm it is filtered out.
+    flt_time = np.array([0.0, 60.0, t_drift_start, t_climb_start])
+    hover_active = np.array([0.0, -127.0, 1.0, 0.0])
 
     flt = xr.Dataset(
         {
             "m_present_time": ("i", flt_time),
-            "x_target_hover_depth": ("i", hover_depth),
+            "x_hover_active": ("i", hover_active),
         }
     )
 
@@ -1038,3 +1208,172 @@ def test_get_profiles_drift_x_target_hover_depth() -> None:
     # Real climb after drift must still be captured
     climb_state = state[time >= t_climb_start]
     assert (climb_state == 2).mean() > 0.7
+
+
+def test_absorb_post_drift_transients() -> None:
+    """Brief dive (state=1) and unknown (state=-1) segments wedged between
+    a drift period and the real climb are absorbed into the climb."""
+    n = 50
+    state = np.full(n, -1, dtype="b")
+    drift_mask = np.zeros(n, dtype=bool)
+    dive_id = np.full(n, -1, dtype="i4")
+    climb_id = np.full(n, -1, dtype="i4")
+    profile_id = np.full(n, -1, dtype="i4")
+
+    state[5:15] = 1  # main dive
+    dive_id[5:15] = 1
+    profile_id[5:15] = 1
+
+    state[15:30] = 3  # drift
+    drift_mask[15:30] = True
+
+    state[30:32] = 1  # spurious brief dive (transient)
+    dive_id[30:32] = 2
+    profile_id[30:32] = 2
+
+    # state[32:34] left as -1 (unknown gap)
+
+    state[34:48] = 2  # real climb
+    climb_id[34:48] = 1
+    profile_id[34:48] = 3
+
+    prof._absorb_post_drift_transients(
+        state,
+        dive_id,
+        climb_id,
+        profile_id,
+        drift_mask,
+        dt_s=10.0,
+        max_transient_duration=180.0,
+    )
+
+    # The transient between drift and climb is now part of the climb
+    assert np.all(state[30:34] == 2)
+    assert np.all(climb_id[30:34] == 1)
+    assert np.all(profile_id[30:34] == 3)
+    assert np.all(dive_id[30:34] == -1)
+
+    # Drift, main dive, and real climb are unchanged
+    assert np.all(state[5:15] == 1)
+    assert np.all(state[15:30] == 3)
+    assert np.all(state[34:48] == 2)
+
+
+def test_absorb_apex_unknowns_splits_at_max_pressure() -> None:
+    """A short unknown gap at the underwater apex between a dive and a climb
+    is split at the pressure maximum: pre-max points become dive, post-max
+    points become climb."""
+    n = 30
+    state = np.full(n, -1, dtype="b")
+    dive_id = np.full(n, -1, dtype="i4")
+    climb_id = np.full(n, -1, dtype="i4")
+    profile_id = np.full(n, -1, dtype="i4")
+    pressure = np.zeros(n)
+
+    state[5:13] = 1
+    dive_id[5:13] = 1
+    profile_id[5:13] = 1
+    pressure[5:13] = np.linspace(10, 80, 8)
+
+    # Indices 13–17 unknown, with peak (90 dbar) at index 15
+    pressure[13:17] = [85, 88, 90, 87]
+
+    state[17:25] = 2
+    climb_id[17:25] = 1
+    profile_id[17:25] = 2
+    pressure[17:25] = np.linspace(85, 5, 8)
+
+    prof._absorb_apex_unknowns(
+        state,
+        dive_id,
+        climb_id,
+        profile_id,
+        pressure,
+        dt_s=10.0,
+        max_gap_duration=180.0,
+        surface_pressure=2.0,
+    )
+
+    # Up to and including the max → dive
+    assert np.all(state[13:16] == 1)
+    assert np.all(dive_id[13:16] == 1)
+    assert np.all(profile_id[13:16] == 1)
+    # After the max → climb
+    assert np.all(state[16:17] == 2)
+    assert np.all(climb_id[16:17] == 1)
+    assert np.all(profile_id[16:17] == 2)
+
+
+def test_absorb_apex_unknowns_skips_surface_gap() -> None:
+    """An unknown gap that goes shallow (glider surfaced) is NOT absorbed; it
+    must be reachable by the surface classifier instead."""
+    n = 30
+    state = np.full(n, -1, dtype="b")
+    dive_id = np.full(n, -1, dtype="i4")
+    climb_id = np.full(n, -1, dtype="i4")
+    profile_id = np.full(n, -1, dtype="i4")
+    pressure = np.zeros(n)
+
+    state[5:10] = 1
+    pressure[5:10] = np.linspace(10, 80, 5)
+    state[10:13] = 2
+    pressure[10:13] = np.linspace(80, 1, 3)  # climb back to surface
+
+    # Unknown gap at the surface (pressure < surface_pressure)
+    pressure[13:17] = [0.3, 0.5, 0.4, 0.6]
+
+    state[17:22] = 1  # next dive
+    pressure[17:22] = np.linspace(1, 60, 5)
+
+    state_before = state.copy()
+
+    prof._absorb_apex_unknowns(
+        state,
+        dive_id,
+        climb_id,
+        profile_id,
+        pressure,
+        dt_s=10.0,
+        max_gap_duration=180.0,
+        surface_pressure=2.0,
+    )
+
+    # The unknown gap was at the surface, so it stays unknown for assign_surface_state
+    assert np.array_equal(state, state_before)
+
+
+def test_absorb_post_drift_transients_does_not_swallow_real_dive() -> None:
+    """A long dive after a drift is not absorbed (only short transients are)."""
+    n = 60
+    state = np.full(n, -1, dtype="b")
+    drift_mask = np.zeros(n, dtype=bool)
+    dive_id = np.full(n, -1, dtype="i4")
+    climb_id = np.full(n, -1, dtype="i4")
+    profile_id = np.full(n, -1, dtype="i4")
+
+    state[5:15] = 3  # drift
+    drift_mask[5:15] = True
+
+    # A long dive (20 samples = 200 s, longer than max_transient_duration of 180 s)
+    state[15:35] = 1
+    dive_id[15:35] = 1
+    profile_id[15:35] = 1
+
+    state[40:55] = 2  # climb (further out)
+    climb_id[40:55] = 1
+    profile_id[40:55] = 2
+
+    state_before = state.copy()
+
+    prof._absorb_post_drift_transients(
+        state,
+        dive_id,
+        climb_id,
+        profile_id,
+        drift_mask,
+        dt_s=10.0,
+        max_transient_duration=180.0,
+    )
+
+    # Nothing should change because the dive between drift and climb is too long
+    assert np.array_equal(state, state_before)
