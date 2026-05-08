@@ -6,24 +6,256 @@ from profinder import find_profiles
 
 _log = logging.getLogger(__name__)
 
+_STATE_ATTRS = dict(
+    long_name="Glider state",
+    flag_values=np.array([-1, 0, 1, 2, 3], "b"),
+    flag_meanings="unknown surface dive climb drift",
+    valid_max=np.int8(3),
+    valid_min=np.int8(-1),
+)
+
+
+def _detect_drift(
+    pressure: np.ndarray,
+    time: np.ndarray,
+    dt_s: float,
+    flt: xr.Dataset | None = None,
+    min_drift_duration: float = 600.0,
+    pressure_std_threshold: float = 2.0,
+    surface_pressure: float = 2.0,
+) -> np.ndarray:
+    """Return boolean mask True where glider is drifting at depth.
+
+    Uses x_hover_active from raw flight data when present (1=on, 0=off,
+    -127=missing; forward-filled to science timestamps).  Otherwise applies a
+    rolling-variance detector: rolling pressure std < pressure_std_threshold
+    and pressure > surface_pressure sustained for min_drift_duration seconds.
+    """
+    n = len(pressure)
+    drift = np.zeros(n, dtype=bool)
+
+    if flt is not None and "x_hover_active" in flt:
+        ft = flt.m_present_time.values
+        ha = flt.x_hover_active.values
+        keep = np.isfinite(ha) & np.isfinite(ft) & (ha != -127)
+        if keep.any():
+            order = np.argsort(ft[keep])
+            ft, ha = ft[keep][order], ha[keep][order]
+            pos = np.searchsorted(ft, time, side="right") - 1
+            in_range = pos >= 0
+            drift[in_range] = ha[pos[in_range]] == 1
+            _log.debug("Drift: %d points from x_hover_active", int(drift.sum()))
+            return drift
+        _log.debug("x_hover_active has no finite values; falling back to pressure")
+
+    valid = np.isfinite(pressure)
+    if not valid.any():
+        return drift
+
+    # Window = min_drift_duration / 4 (smaller reduces edge miss). np.convolve
+    # mode='same' returns max(n, window) elements, so cap so window < n.
+    half = min((n - 1) // 2, max(2, round(min_drift_duration / 4 / dt_s)))
+    ones = np.ones(2 * half + 1)
+    p_fill = np.where(valid, pressure, 0.0)
+    cnt = np.convolve(valid.astype(float), ones, mode="same")
+    sm = np.convolve(p_fill, ones, mode="same")
+    sq = np.convolve(p_fill**2, ones, mode="same")
+    safe = np.where(cnt >= 3, cnt, 1.0)
+    var = sq / safe - (sm / safe) ** 2
+    rolling_std = np.where(cnt >= 3, np.sqrt(np.maximum(0.0, var)), np.inf)
+
+    candidate = (
+        valid & (pressure > surface_pressure) & (rolling_std < pressure_std_threshold)
+    )
+
+    # Keep only contiguous runs spanning at least min_drift_duration seconds.
+    i = 0
+    while i < n:
+        if not candidate[i]:
+            i += 1
+            continue
+        j = i + 1
+        while j < n and candidate[j]:
+            j += 1
+        if (j - i) * dt_s >= min_drift_duration:
+            drift[i:j] = True
+        i = j
+
+    # The rolling-variance window misses the settling phase (overshoot
+    # recovery before, slow ascent start after).  Expand each drift run to
+    # absorb adjacent samples whose pressure is close to the drift mean.
+    # A real climb/dive moves through drift depth quickly so the expansion
+    # stops shortly after crossing it.
+    if drift.any():
+        diff_d = np.diff(drift.astype(int), prepend=0, append=0)
+        run_starts, run_ends = np.where(diff_d == 1)[0], np.where(diff_d == -1)[0]
+        tol = 2 * pressure_std_threshold
+        for s, e in zip(run_starts, run_ends):
+            mean_p = float(np.nanmean(pressure[s:e]))
+            while (
+                s > 0
+                and np.isfinite(pressure[s - 1])
+                and abs(pressure[s - 1] - mean_p) < tol
+            ):
+                s -= 1
+            while (
+                e < n and np.isfinite(pressure[e]) and abs(pressure[e] - mean_p) < tol
+            ):
+                e += 1
+            drift[s:e] = True
+
+    _log.debug("Drift: %d points from pressure detector", int(drift.sum()))
+    return drift
+
+
+def _absorb_apex_unknowns(
+    state: np.ndarray,
+    dive_id: np.ndarray,
+    climb_id: np.ndarray,
+    profile_id: np.ndarray,
+    pressure: np.ndarray,
+    dt_s: float,
+    max_gap_duration: float,
+    surface_pressure: float = 2.0,
+) -> None:
+    """Split short underwater unknown gaps between adjacent profiles at the
+    pressure extremum.  Handles dive→climb (split at max: pre→dive, post→climb)
+    and climb→dive yo-tops (split at min: pre→climb, post→dive).  Skips gaps
+    that go shallow (left for the surface classifier) or are too long."""
+    n = len(state)
+    unknown = state == -1
+    if not unknown.any():
+        return
+    diff = np.diff(unknown.astype(int), prepend=0, append=0)
+    starts, ends = np.where(diff == 1)[0], np.where(diff == -1)[0]
+    max_samples = max(2, round(max_gap_duration / dt_s))
+
+    for s, e in zip(starts, ends):
+        if (e - s) > max_samples or s == 0 or e >= n:
+            continue
+        prev, nxt = int(state[s - 1]), int(state[e])
+        if {prev, nxt} != {1, 2}:
+            continue
+        p = pressure[s:e]
+        finite = np.isfinite(p)
+        if not finite.any() or float(np.min(p[finite])) < surface_pressure:
+            continue
+        # dive→climb splits at max (extremum is positive); climb→dive at min.
+        fill, extreme = (-np.inf, np.argmax) if prev == 1 else (np.inf, np.argmin)
+        split = s + int(extreme(np.where(finite, p, fill))) + 1
+        pre_id = dive_id if prev == 1 else climb_id
+        post_id = climb_id if nxt == 2 else dive_id
+        state[s:split] = prev
+        state[split:e] = nxt
+        pre_id[s:split] = pre_id[s - 1]
+        post_id[split:e] = post_id[e]
+        profile_id[s:split] = profile_id[s - 1]
+        profile_id[split:e] = profile_id[e]
+
+
+def _absorb_pre_drift_transients(
+    state: np.ndarray,
+    dive_id: np.ndarray,
+    climb_id: np.ndarray,
+    profile_id: np.ndarray,
+    drift_mask: np.ndarray,
+    dt_s: float,
+    max_transient_duration: float,
+) -> None:
+    """Fold brief climb/unknown segments between a dive end and a drift start
+    into that drift.  This is the dive overshoot recovery: the glider arrives
+    past target, briefly recovers upward, then settles into hover.  Without
+    this pass the recovery becomes a tiny climb profile in L3."""
+    n = len(state)
+    if not drift_mask.any():
+        return
+    diff = np.diff(drift_mask.astype(int), prepend=0, append=0)
+    drift_starts = np.where(diff == 1)[0]
+    window = max(2, round(max_transient_duration / dt_s))
+
+    for ds_ in drift_starts:
+        if ds_ == 0:
+            continue
+        start = max(0, ds_ - window)
+        i = ds_ - 1
+        while i >= start and (state[i] == 2 or state[i] == -1):
+            i -= 1
+        # Only absorb when bounded on the left by a dive within the window
+        if i < start or state[i] != 1:
+            continue
+        state[i + 1 : ds_] = 3
+        dive_id[i + 1 : ds_] = -1
+        climb_id[i + 1 : ds_] = -1
+        profile_id[i + 1 : ds_] = -1
+
+
+def _absorb_post_drift_transients(
+    state: np.ndarray,
+    dive_id: np.ndarray,
+    climb_id: np.ndarray,
+    profile_id: np.ndarray,
+    drift_mask: np.ndarray,
+    dt_s: float,
+    max_transient_duration: float,
+) -> None:
+    """Fold brief dive/unknown segments between a drift end and the next climb
+    into that climb.  The drift mask gap can cause profinder to detect a
+    spurious tiny peak; this extends the climb backward to absorb it."""
+    n = len(state)
+    if not drift_mask.any():
+        return
+    diff = np.diff(drift_mask.astype(int), prepend=0, append=0)
+    drift_ends = np.where(diff == -1)[0]
+    window = max(2, round(max_transient_duration / dt_s))
+
+    for de in drift_ends:
+        if de >= n:
+            continue
+        in_window = state[de : min(de + window, n)]
+        climb_local = np.where(in_window == 2)[0]
+        if len(climb_local) == 0:
+            continue
+        first_climb = de + int(climb_local[0])
+        if first_climb == de:
+            continue
+        intermediate = state[de:first_climb]
+        if not np.all((intermediate == 1) | (intermediate == -1)):
+            continue
+        state[de:first_climb] = 2
+        climb_id[de:first_climb] = climb_id[first_climb]
+        profile_id[de:first_climb] = profile_id[first_climb]
+        dive_id[de:first_climb] = -1
+
 
 def get_profiles(
     ds: xr.Dataset,
     shallowest_profile: float,
     min_surface_time: float = 180.0,
+    flt: xr.Dataset | None = None,
+    min_drift_duration: float = 600.0,
+    drift_pressure_std: float = 2.0,
 ) -> xr.Dataset:
-    """Identify dive and climb profiles from a pressure time series.
+    """Identify dive, climb, and drift profiles from a pressure time series.
 
     Parameters
     ----------
     ds : xr.Dataset
         Merged L2 dataset with 'pressure' and 'time' variables.
     shallowest_profile : float
-        Minimum peak pressure (dbar) for a profile to be recognised.
+        Minimum peak pressure (dbar) for a profile to be recognised.  Also
+        used as the inter-profile trough prominence threshold so small stalls
+        within a climb are not mistaken for surfacings.
     min_surface_time : float
-        Minimum time (seconds) between consecutive dive apexes.  Used to
-        compute sample-count thresholds so the detector adapts to the data
-        sampling rate.  A value of ~180 s works for most Slocum deployments.
+        Minimum time (seconds) between consecutive dive apexes (default 180).
+    flt : xr.Dataset, optional
+        Raw flight data.  Used to detect drift via x_hover_active when
+        present; otherwise the rolling-variance fallback runs.
+    min_drift_duration : float
+        Minimum sustained-low-variance duration (s) for the pressure-based
+        drift detector (default 600 s).
+    drift_pressure_std : float
+        Rolling pressure std threshold (dbar) for the pressure-based drift
+        detector (default 2.0).
     """
     raw_diff = np.diff(ds.time.values)
     if np.issubdtype(raw_diff.dtype, np.timedelta64):
@@ -32,6 +264,20 @@ def get_profiles(
         dt_s = float(np.nanmedian(raw_diff))
     fs = 1.0 / dt_s
 
+    drift_mask = _detect_drift(
+        ds.pressure.values,
+        ds.time.values,
+        dt_s,
+        flt=flt,
+        min_drift_duration=min_drift_duration,
+        pressure_std_threshold=drift_pressure_std,
+    )
+
+    # Mask drift before profile finding so profinder pairs the post-drift
+    # climb with the pre-drift dive across the gap (missing="drop").
+    pressure_masked = ds.pressure.values.copy().astype(float)
+    pressure_masked[drift_mask] = np.nan
+
     peaks_kwargs = {
         "height": shallowest_profile,
         "prominence": shallowest_profile,
@@ -39,25 +285,26 @@ def get_profiles(
         "width": max(2, round(20 * fs)),  # ≥20 s half-width detects ~10 m dives
     }
     troughs_kwargs = {
-        "prominence": 2,
+        # Real inter-profile troughs are at least as deep as a real dive's
+        # prominence; smaller "troughs" are stalls within a profile.
+        "prominence": shallowest_profile,
         "distance": max(2, round(30 * fs)),
         "width": max(1, round(5 * fs)),
     }
 
-    _log.debug(
-        "fs=%.3f Hz; peaks_kwargs=%s; troughs_kwargs=%s",
-        fs,
-        peaks_kwargs,
-        troughs_kwargs,
-    )
+    _log.debug("fs=%.3f Hz; peaks=%s; troughs=%s", fs, peaks_kwargs, troughs_kwargs)
 
     profiles = find_profiles(
-        ds.pressure.values,
+        pressure_masked,
         peaks_kwargs=peaks_kwargs,
         troughs_kwargs=troughs_kwargs,
+        # Real glider pressure has per-second sensor bobbing (positive Δp every
+        # ~5 samples) that breaks profinder's default 4-sample-all-ascent
+        # confirmation, terminating the climb tens of dbar above the surface.
+        # 2 samples is loose enough to find ascent windows through the bobbing.
+        run_length=2,
         missing="drop",
     )
-
     _log.debug("Found %i profiles", len(profiles))
 
     n = ds.time.size
@@ -66,40 +313,32 @@ def get_profiles(
     profile_id = np.full(n, -1, dtype="i4")
     state = np.full(n, -1, dtype="b")
 
-    dive_counter = 1
-    climb_counter = 1
-    profile_counter = 1
+    pid = 1
+    for k, (ds_, de, cs, ce) in enumerate(profiles, start=1):
+        dive_id[ds_:de] = k
+        profile_id[ds_:de] = pid
+        state[ds_:de] = 1
+        climb_id[cs:ce] = k
+        profile_id[cs:ce] = pid + 1
+        state[cs:ce] = 2
+        pid += 2
 
-    for prof in profiles:
-        dive_start, dive_end, climb_start, climb_end = prof
+    # Drift overrides any profile membership profinder may have spanned across
+    state[drift_mask] = 3
+    dive_id[drift_mask] = -1
+    climb_id[drift_mask] = -1
+    profile_id[drift_mask] = -1
 
-        dive_id[dive_start:dive_end] = dive_counter
-        profile_id[dive_start:dive_end] = profile_counter
-        state[dive_start:dive_end] = 1
-        dive_counter += 1
-        profile_counter += 1
+    ids = (state, dive_id, climb_id, profile_id)
+    _absorb_pre_drift_transients(*ids, drift_mask, dt_s, min_surface_time)
+    _absorb_post_drift_transients(*ids, drift_mask, dt_s, min_surface_time)
+    _absorb_apex_unknowns(*ids, ds.pressure.values, dt_s, min_surface_time)
 
-        climb_id[climb_start:climb_end] = climb_counter
-        profile_id[climb_start:climb_end] = profile_counter
-        state[climb_start:climb_end] = 2
-        climb_counter += 1
-        profile_counter += 1
-
-    ds["dive_id"] = ("time", dive_id, dict(_FillValue=np.int32(-1)))
-    ds["climb_id"] = ("time", climb_id, dict(_FillValue=np.int32(-1)))
-    ds["profile_id"] = ("time", profile_id, dict(_FillValue=np.int32(-1)))
-    ds["state"] = (
-        "time",
-        state,
-        dict(
-            long_name="Glider state",
-            flag_values=np.array([-1, 0, 1, 2], "b"),
-            flag_meanings="unknown surface dive climb",
-            valid_max=np.int8(2),
-            valid_min=np.int8(-1),
-        ),
-    )
-
+    fill = dict(_FillValue=np.int32(-1))
+    ds["dive_id"] = ("time", dive_id, fill)
+    ds["climb_id"] = ("time", climb_id, fill)
+    ds["profile_id"] = ("time", profile_id, fill)
+    ds["state"] = ("time", state, _STATE_ATTRS)
     return ds
 
 
@@ -109,61 +348,63 @@ def assign_surface_state(
     dt: float = 300.0,
     surface_pressure: float = 2.0,
 ) -> xr.Dataset:
-    """Assign surface state (0) to unknown points near GPS fixes.
+    """Assign surface state (0) to unknown points.
 
-    A point with state == -1 (unknown) is marked as surface (0) only if it is
-    within `dt` seconds of a valid GPS fix AND shallower than `surface_pressure`
-    dbar.  The pressure gate prevents the broad GPS time window from reaching
-    into adjacent dives.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Dataset with state variable from get_profiles.
-    flt : xr.Dataset, optional
-        Raw flight data containing m_gps_lat/lon with valid GPS fix times.
-    dt : float
-        Time threshold in seconds for matching to GPS fixes (default 300).
-    surface_pressure : float
-        Maximum pressure (dbar) for a point to be considered at the surface
-        (default 2.0).
+    Two passes: (1) GPS-proximity — unknowns within `dt` seconds of a valid
+    GPS fix AND shallower than `surface_pressure`; (2) whole-segment — any
+    contiguous unknown run with no finite pressure ≥ `surface_pressure`.
+    Missing pressure is the expected state at the surface (sensor out of
+    water), so all-NaN runs are treated as surface — except when bounded by
+    dive→climb (the underwater apex), which is left unknown.
     """
-    if flt is None or "m_gps_lat" not in flt:
-        _log.warning("No flight data with GPS, cannot assign surface state")
-        return ds
-
-    gps_valid = np.isfinite(flt.m_gps_lat.values)
-    if not gps_valid.any():
-        _log.warning("No valid GPS fixes found")
-        return ds
-
-    gps_times = np.sort(flt.m_present_time.values[gps_valid])
-
     state = ds.state.values.copy()
+    pressure = ds.pressure.values
     time_l2 = ds.time.values
-    unknown_mask = state == -1
 
-    if unknown_mask.any():
-        unknown_times = time_l2[unknown_mask]
-        pos = np.searchsorted(gps_times, unknown_times)
-        dist_left = np.where(
-            pos > 0,
-            unknown_times - gps_times[np.maximum(pos - 1, 0)],
-            np.inf,
-        )
-        dist_right = np.where(
-            pos < len(gps_times),
-            gps_times[np.minimum(pos, len(gps_times) - 1)] - unknown_times,
-            np.inf,
-        )
-        is_near = np.minimum(dist_left, dist_right) <= dt
-        is_shallow = np.isfinite(ds.pressure.values[unknown_mask]) & (
-            ds.pressure.values[unknown_mask] < surface_pressure
-        )
-        is_near = is_near & is_shallow
+    if flt is not None and "m_gps_lat" in flt:
+        gps_valid = np.isfinite(flt.m_gps_lat.values)
+        if gps_valid.any():
+            gps_times = np.sort(flt.m_present_time.values[gps_valid])
+            unk = state == -1
+            if unk.any():
+                ut = time_l2[unk]
+                pos = np.searchsorted(gps_times, ut)
+                left = np.where(pos > 0, ut - gps_times[np.maximum(pos - 1, 0)], np.inf)
+                right = np.where(
+                    pos < len(gps_times),
+                    gps_times[np.minimum(pos, len(gps_times) - 1)] - ut,
+                    np.inf,
+                )
+                near = np.minimum(left, right) <= dt
+                shallow = np.isfinite(pressure[unk]) & (
+                    pressure[unk] < surface_pressure
+                )
+                state[unk] = np.where(near & shallow, np.int8(0), state[unk])
+        else:
+            _log.warning("No valid GPS fixes found")
+    else:
+        _log.warning("No flight data with GPS, skipping GPS-proximity surface check")
 
-        state[unknown_mask] = np.where(is_near, np.int8(0), state[unknown_mask])
-        _log.debug("Assigned %d points to surface state", int(is_near.sum()))
+    unknown = state == -1
+    if unknown.any():
+        n = len(state)
+        diff = np.diff(unknown.astype(int), prepend=0, append=0)
+        starts, ends = np.where(diff == 1)[0], np.where(diff == -1)[0]
+        for s, e in zip(starts, ends):
+            p = pressure[s:e]
+            finite = np.isfinite(p)
+            if finite.any() and float(np.max(p[finite])) >= surface_pressure:
+                continue
+            # All-NaN gap bounded by dive→climb is the underwater apex; leave it
+            if (
+                not finite.any()
+                and 0 < s
+                and e < n
+                and state[s - 1] == 1
+                and state[e] == 2
+            ):
+                continue
+            state[s:e] = 0
 
     ds["state"] = ("time", state, ds.state.attrs)
     return ds

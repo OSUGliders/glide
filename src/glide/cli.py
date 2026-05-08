@@ -228,7 +228,9 @@ def l2(
 
     merged = process_l1.calculate_thermodynamics(merged, conf)
 
-    out = profiles.get_profiles(merged, shallowest_profile, min_surface_time)
+    out = profiles.get_profiles(
+        merged, shallowest_profile, min_surface_time, flt=flt_raw
+    )
 
     out = profiles.assign_surface_state(out, flt=flt_raw)
 

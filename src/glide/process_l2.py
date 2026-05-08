@@ -231,6 +231,9 @@ def bin_l2(
 
     for row in profile_indexes:
         profile = ds.isel(i=slice(row[0], row[1]))
+        if not np.isfinite(profile.depth.values).any():
+            _log.debug("Skipping profile [%d:%d] with no finite depth", row[0], row[1])
+            continue
         time = profile.time.values
         idx_mid = np.searchsorted(time, 0.5 * (time[0] + time[-1]))
 
