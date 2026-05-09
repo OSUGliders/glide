@@ -179,6 +179,7 @@ def load_config(file: str | None = None) -> dict:
         - instruments: per-deployment instrument metadata
         - include: which optional suites are enabled
         - ngdac: IOOS NGDAC structural metadata
+        - flight: optional flight model parameters (empty dict if not set)
     """
     # Load core definitions
     core, flight, thermo, ngdac = _load_core()
@@ -203,6 +204,7 @@ def load_config(file: str | None = None) -> dict:
     qc_overrides = _section("qc")
     l1_vars = _section("l1_variables")
     merged_vars = _section("merged_variables")
+    flight_model_cfg = _section("flight")
 
     include_flight = include.get("flight", True)
     include_thermo = include.get("thermo", True)
@@ -258,6 +260,7 @@ def load_config(file: str | None = None) -> dict:
             flight=include_flight,
             thermo=include_thermo,
         ),
+        flight=flight_model_cfg,
     )
 
     return config
