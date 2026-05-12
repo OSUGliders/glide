@@ -22,7 +22,7 @@ from . import (
     profiles,
 )
 from . import (
-    flight as flight_module,
+    flight as flt,
 )
 
 _log = logging.getLogger(__name__)
@@ -467,9 +467,9 @@ def flight(
 
     ds = process_l2.parse_l2(l2_file)
 
-    params = flight_module.calibrate(ds, conf)
+    params = flt.calibrate(ds, conf)
 
-    out = flight_module.apply_model(ds, params)
+    out = flt.apply_model(ds, params)
 
     if inplace:
         target = l2_file

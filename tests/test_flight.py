@@ -90,47 +90,6 @@ def test_solve_aoa_zero_pitch():
 
 
 # ---------------------------------------------------------------------------
-# solve_flight integration test
-# ---------------------------------------------------------------------------
-
-
-def test_solve_flight_shapes():
-    n = 50
-    t = np.linspace(0, 3600, n)
-    pressure = np.linspace(5, 100, n)
-    z = np.linspace(-5.0, -100.0, n)  # diving
-    pitch = np.deg2rad(np.linspace(20, 20, n))
-    ballast = np.full(n, 0.0)
-    density = np.full(n, 1025.0)
-    p = fl._build_params({})
-
-    result = fl.solve_flight(t, pressure, z, np.rad2deg(pitch), ballast, density, p)
-
-    for key in (
-        "speed_through_water",
-        "vertical_glider_velocity",
-        "vertical_water_velocity",
-        "angle_of_attack",
-    ):
-        assert key in result
-        assert result[key].shape == (n,), f"{key} has wrong shape"
-
-
-def test_solve_flight_speed_nonneg():
-    n = 50
-    t = np.linspace(0, 3600, n)
-    pressure = np.linspace(5, 100, n)
-    z = np.linspace(-5.0, -100.0, n)  # diving
-    pitch_deg = np.full(n, 20.0)
-    ballast = np.full(n, 0.0)
-    density = np.full(n, 1025.0)
-    p = fl._build_params({})
-
-    result = fl.solve_flight(t, pressure, z, pitch_deg, ballast, density, p)
-    assert np.all(result["speed_through_water"] >= 0)
-
-
-# ---------------------------------------------------------------------------
 # calibrate
 # ---------------------------------------------------------------------------
 

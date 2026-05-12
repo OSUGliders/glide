@@ -1,4 +1,4 @@
-# Steady-state glider flight model following Merckelbach et al. (2010)
+# Steady-state glider flight model following Merckelbach et al. 2010 & 2019.
 
 import logging
 
@@ -8,6 +8,7 @@ from scipy.interpolate import interp1d
 from scipy.optimize import fsolve, least_squares
 
 from .config import _load_core
+from .convert import cm3_to_m3, dbar_to_Pa, deg_to_rad
 
 _log = logging.getLogger(__name__)
 
@@ -78,36 +79,73 @@ def _build_params(cfg: dict) -> dict:
     return p
 
 
+def _to_si(ds: xr.Dataset) -> dict[str, np.ndarray]:
+    """Extract flight model inputs from ds and convert to SI units.
+
+    If ``dzdt`` is already present in ds (pre-computed on a larger timeseries),
+    it is used directly; otherwise it is computed via np.gradient on z and time.
+
+    Returns a dict with keys: pressure [Pa], dzdt [m s-1], pitch [rad],
+    Vbp [m3], density [kg m-3].
+    """
+    time_s = ds.time.values.astype("f8") / 1e9
+    dzdt = (
+        ds.dzdt.values.astype("f8")
+        if "dzdt" in ds
+        else np.gradient(ds.z.values.astype("f8"), time_s)
+    )
+    return dict(
+        pressure=dbar_to_Pa(ds.pressure.values.astype("f8")),
+        dzdt=dzdt,
+        pitch=deg_to_rad(ds.pitch.values.astype("f8")),
+        Vbp=cm3_to_m3(ds.ballast_pumped.values.astype("f8")),
+        density=ds.density.values.astype("f8"),
+    )
+
+
 def _compute_buoyancy(
-    pressure_Pa: np.ndarray,
+    pressure: np.ndarray,
     rho: np.ndarray,
-    Vbp_m3: np.ndarray,
+    Vbp: np.ndarray,
     Vg: float,
     hull_compressibility: float,
     mg: float,
 ) -> tuple[np.ndarray, float]:
-    """Return buoyancy force FB (N) and gravity force Fg (N). Merchelbach et al. 2019 equation 3 & 4."""
-    FB = _G * rho * (Vg * (1.0 - hull_compressibility * pressure_Pa) + Vbp_m3)
+    """Return buoyancy force FB (N) and gravity force Fg (N).
+
+    pressure : Pa
+    Vbp : m3
+
+    Merckelbach et al. 2019 equation 3 & 4.
+    """
+    FB = _G * rho * (Vg * (1.0 - hull_compressibility * pressure) + Vbp)
     Fg = mg * _G
     return FB, Fg
 
 
 def _aoa_equation(
-    alpha: float, pitch_rad: float, Cd0: float, Cd1: float, ah: float, aw: float
+    alpha: float, pitch: float, Cd0: float, Cd1: float, ah: float, aw: float
 ) -> float:
-    """Implicit equation whose zero is the angle of attack. Merchelbach et al. 2019 equation 9."""
-    return (Cd0 + Cd1 * alpha**2) / ((ah + aw) * np.tan(alpha + pitch_rad)) - alpha
+    """Implicit equation whose zero is the angle of attack.
+
+    pitch : rad
+
+    Merckelbach et al. 2019 equation 9.
+    """
+    return (Cd0 + Cd1 * alpha**2) / ((ah + aw) * np.tan(alpha + pitch)) - alpha
 
 
 def _solve_aoa(
-    pitch_rad: np.ndarray, Cd0: float, Cd1: float, ah: float, aw: float
+    pitch: np.ndarray, Cd0: float, Cd1: float, ah: float, aw: float
 ) -> np.ndarray:
     """Solve for angle of attack at each pitch sample.
+
+    pitch : rad
 
     Builds an interpolating table over the pitch range for efficiency, then
     applies it.  Pitches whose magnitude is below ~5 degrees receive aoa = 0.
     """
-    pitch_abs = np.abs(pitch_rad)
+    pitch_abs = np.abs(pitch)
     pitch_grid = np.linspace(5 * np.pi / 180, 60 * np.pi / 180, 120)
 
     aoa_grid = np.zeros_like(pitch_grid)
@@ -124,7 +162,7 @@ def _solve_aoa(
 
     aoa = np.where(
         pitch_abs >= pitch_grid[0],
-        ifun(pitch_abs) * np.sign(pitch_rad),
+        ifun(pitch_abs) * np.sign(pitch),
         0.0,
     )
     return aoa
@@ -135,62 +173,59 @@ def _compute_speed(
     Fg: float,
     rho: np.ndarray,
     alpha: np.ndarray,
-    pitch_rad: np.ndarray,
+    pitch: np.ndarray,
     reference_area: float,
     Cd0: float,
     Cd1: float,
 ) -> np.ndarray:
-    """Incident water speed U (m s-1) from force balance. Merchelbach et al. 2019 equation 8."""
-    numer = 2.0 * (FB - Fg) * np.sin(pitch_rad + alpha)
+    """Incident water speed U (m s-1) from force balance.
+
+    pitch : rad
+
+    Merckelbach et al. 2019 equation 8.
+    """
+    numer = 2.0 * (FB - Fg) * np.sin(pitch + alpha)
     denom = rho * reference_area * (Cd0 + Cd1 * alpha**2)
     U2 = np.where(denom != 0, numer / denom, 0.0)
     U2 = np.maximum(U2, 0.0)
     return np.sqrt(U2)
 
 
-def _solve_flight_si(
-    pressure_Pa: np.ndarray,
+def _solve_flight(
+    pressure: np.ndarray,
     dzdt: np.ndarray,
-    pitch_rad: np.ndarray,
-    Vbp_m3: np.ndarray,
+    pitch: np.ndarray,
+    Vbp: np.ndarray,
     density: np.ndarray,
     p: dict,
 ) -> dict:
-    """Core steady-state flight model operating entirely in SI units.
+    """Core steady-state flight model. All inputs in SI units.
 
     Parameters
     ----------
-    pressure_Pa : array
-        Pressure in Pa (used only for buoyancy / compressibility).
-    dzdt : array
-        Observed vertical velocity dz/dt in m s⁻¹ (upward positive),
-        pre-computed from np.gradient(z_m, time_s) on the full timeseries.
-    pitch_rad : array
-        Pitch in radians (positive nose-up).
-    Vbp_m3 : array
-        Ballast volume change in m³.
-    density : array
-        In-situ seawater density in kg m⁻³.
-    p : dict
-        Model parameters (see DEFAULTS).
+    pressure : Pa
+    dzdt : m s-1, observed vertical velocity (upward positive)
+    pitch : rad
+    Vbp : m3, ballast volume change
+    density : kg m-3, in-situ seawater density
 
     Returns
     -------
-    dict with keys: speed_through_water (m s⁻¹), vertical_glider_velocity
-    (m s⁻¹), vertical_water_velocity (m s⁻¹), angle_of_attack (degrees).
+    dict with keys: speed_through_water [m s-1], vertical_glider_velocity
+    [m s-1], vertical_water_velocity [m s-1], angle_of_attack [degrees].
     """
     FB, Fg = _compute_buoyancy(
-        pressure_Pa, density, Vbp_m3, p["Vg"], p["hull_compressibility"], p["mg"]
+        pressure, density, Vbp, p["Vg"], p["hull_compressibility"], p["mg"]
     )
-    alpha = _solve_aoa(pitch_rad, p["Cd0"], p["Cd1"], p["ah"], p["aw"])
+    alpha = _solve_aoa(pitch, p["Cd0"], p["Cd1"], p["ah"], p["aw"])
     U = _compute_speed(
-        FB, Fg, density, alpha, pitch_rad, p["reference_area"], p["Cd0"], p["Cd1"]
+        FB, Fg, density, alpha, pitch, p["reference_area"], p["Cd0"], p["Cd1"]
     )
 
     # wg: vertical component of glider velocity through the water (upward +)
     # sin(pitch + alpha) is negative when diving (negative pitch), positive
     # when climbing — matching the z convention.
-    wg = U * np.sin(pitch_rad + alpha)
+    wg = U * np.sin(pitch + alpha)
     ww = dzdt - wg  # vertical water velocity
 
     return dict(
@@ -201,60 +236,20 @@ def _solve_flight_si(
     )
 
 
-def solve_flight(
-    time_s: np.ndarray,
-    pressure_dbar: np.ndarray,
-    z_m: np.ndarray,
-    pitch_deg: np.ndarray,
-    ballast_cm3: np.ndarray,
-    density: np.ndarray,
-    p: dict,
-) -> dict:
-    """Run the steady-state flight model.
-
-    Accepts glide-native units and converts to SI before running the model.
-
-    Parameters
-    ----------
-    time_s : array
-        Time in seconds since epoch.
-    pressure_dbar : array
-        Pressure in dbar (used only for buoyancy / compressibility).
-    z_m : array
-        Height in metres (upward positive, from gsw.z_from_p).
-    pitch_deg : array
-        Pitch in degrees (positive nose-up).
-    ballast_cm3 : array
-        Ballast pumped in cm³.
-    density : array
-        In-situ seawater density in kg m⁻³.
-    p : dict
-        Model parameters (see DEFAULTS).
-
-    Returns
-    -------
-    dict with keys: speed_through_water (m s⁻¹), vertical_glider_velocity
-    (m s⁻¹), vertical_water_velocity (m s⁻¹), angle_of_attack (degrees).
-    """
-    pressure_Pa = pressure_dbar * 1e4  # dbar → Pa
-    pitch_rad = np.deg2rad(pitch_deg)  # degrees → radians
-    Vbp_m3 = ballast_cm3 * 1e-6  # cm³ → m³
-
-    dzdt = np.gradient(z_m, time_s)  # dz/dt on full timeseries (upward +)
-    return _solve_flight_si(pressure_Pa, dzdt, pitch_rad, Vbp_m3, density, p)
-
-
 def _residuals(
     x: np.ndarray,
     param_names: list[str],
     base_params: dict,
-    pressure_Pa: np.ndarray,
+    pressure: np.ndarray,
     dzdt: np.ndarray,
-    pitch_rad: np.ndarray,
-    Vbp_m3: np.ndarray,
+    pitch: np.ndarray,
+    Vbp: np.ndarray,
     density: np.ndarray,
 ) -> np.ndarray:
-    """Residual vector (modelled minus observed vertical velocity) for least_squares."""
+    """Residual vector (modelled minus observed vertical velocity) for least_squares.
+
+    pressure : Pa; pitch : rad; Vbp : m3
+    """
     p = {**base_params}
     for name, val in zip(param_names, x):
         p[name] = val
@@ -268,7 +263,7 @@ def _residuals(
             p["aw"], p["osborne_efficiency"], p["aspect_ratio"], p["Cd1_hull"]
         )
 
-    result = _solve_flight_si(pressure_Pa, dzdt, pitch_rad, Vbp_m3, density, p)
+    result = _solve_flight(pressure, dzdt, pitch, Vbp, density, p)
     return result["vertical_glider_velocity"] - dzdt
 
 
@@ -295,14 +290,10 @@ def calibrate(ds: xr.Dataset, conf: dict) -> dict:
     if missing:
         raise ValueError(f"L2 dataset is missing required variables: {missing}")
 
-    # Drop rows with any NaN in the required variables.
+    # Drop rows with any NaN, then compute dzdt on the clean contiguous timeseries
+    # before any pressure/time subsetting (so edge samples aren't lost).
     full = ds[required].dropna(dim="time", how="any")
-
-    # Compute dzdt on the full clean timeseries
-    time_s_full = full.time.values.astype("f8") / 1e9
-    z_m_full = full.z.values.astype("f8")
-    dzdt_full = np.gradient(z_m_full, time_s_full)
-    full["dzdt"] = ("time", dzdt_full)
+    full["dzdt"] = ("time", _to_si(full)["dzdt"])
 
     bounds = flight_cfg.get("bounds", {})
     min_pressure = float(bounds.get("min_pressure", 20.0))
@@ -323,11 +314,8 @@ def calibrate(ds: xr.Dataset, conf: dict) -> dict:
             "Check flight.bounds in the config."
         )
 
-    pressure_Pa = sub.pressure.values.astype("f8") * 1e4  # dbar to Pa
-    dzdt = sub.dzdt.values.astype("f8")  # m s-1
-    pitch_rad = np.deg2rad(sub.pitch.values.astype("f8"))  # degrees to radians
-    Vbp_m3 = sub.ballast_pumped.values.astype("f8") * 1e-6  # cm3 to m3
-    density = sub.density.values.astype("f8")  # already kg m-3
+    # _to_si picks up the pre-computed dzdt stored in sub["dzdt"]
+    si = _to_si(sub)
 
     calibrate_params = flight_cfg.get("calibrate", ["Vg", "mg", "Cd0", "ah"])
     _log.info("Calibrating parameters: %s", calibrate_params)
@@ -336,7 +324,15 @@ def calibrate(ds: xr.Dataset, conf: dict) -> dict:
     lb = np.array([BOUNDS.get(name, (-np.inf, np.inf))[0] for name in calibrate_params])
     ub = np.array([BOUNDS.get(name, (-np.inf, np.inf))[1] for name in calibrate_params])
 
-    args = (calibrate_params, p, pressure_Pa, dzdt, pitch_rad, Vbp_m3, density)
+    args = (
+        calibrate_params,
+        p,
+        si["pressure"],
+        si["dzdt"],
+        si["pitch"],
+        si["Vbp"],
+        si["density"],
+    )
 
     result = least_squares(
         _residuals, x0, args=args, bounds=(lb, ub), x_scale="jac", method="trf"
@@ -367,7 +363,7 @@ def apply_model(ds: xr.Dataset, params: dict) -> xr.Dataset:
     Parameters
     ----------
     ds : xr.Dataset
-        L2 dataset.  Must contain: pressure, pitch, ballast_pumped, density.
+        L2 dataset.  Must contain: pressure, pitch, ballast_pumped, density, z.
     params : dict
         Model parameters (e.g. as returned by calibrate()).
 
@@ -382,18 +378,10 @@ def apply_model(ds: xr.Dataset, params: dict) -> xr.Dataset:
     if missing:
         raise ValueError(f"L2 dataset is missing required variables: {missing}")
 
-    # --- unit conversion: glide native → SI -----------------------------------
-    time_s = ds.time.values.astype("f8") / 1e9
-    pressure_Pa = ds.pressure.values.astype("f8") * 1e4  # dbar → Pa
-    z_m = ds.z.values.astype("f8")  # m, already SI
-    pitch_rad = np.deg2rad(ds.pitch.values.astype("f8"))  # degrees → radians
-    Vbp_m3 = ds.ballast_pumped.values.astype("f8") * 1e-6  # cm³ → m³
-    density = ds.density.values.astype("f8")
-    # Compute dzdt on the full dataset timeseries before any subsetting.
-    dzdt = np.gradient(z_m, time_s)
-    # --------------------------------------------------------------------------
-
-    result = _solve_flight_si(pressure_Pa, dzdt, pitch_rad, Vbp_m3, density, params)
+    si = _to_si(ds)
+    result = _solve_flight(
+        si["pressure"], si["dzdt"], si["pitch"], si["Vbp"], si["density"], params
+    )
 
     out = ds.copy()
 
