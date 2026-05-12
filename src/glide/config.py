@@ -39,7 +39,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def _load_core() -> tuple[dict, dict, dict, dict]:
+def _load_core() -> tuple[dict, dict, dict, dict, dict]:
     """Load core variable definitions from bundled core.yml.
 
     Returns
@@ -52,6 +52,8 @@ def _load_core() -> tuple[dict, dict, dict, dict]:
         Optional derived thermodynamic variables.
     ngdac : dict
         IOOS NGDAC structural configuration.
+    flight_model : dict
+        Output variable definitions for the steady-state flight model.
     """
     from importlib import resources
 
@@ -60,18 +62,19 @@ def _load_core() -> tuple[dict, dict, dict, dict]:
     with open(core_file) as f:
         docs = [doc for doc in safe_load_all(f)]
 
-    if len(docs) != 4:
+    if len(docs) != 5:
         raise ValueError(
-            f"Expected core.yml to contain exactly 4 YAML documents (core, "
-            f"flight_attitude, derived_thermo, ngdac), but found {len(docs)}."
+            f"Expected core.yml to contain exactly 5 YAML documents (core, "
+            f"flight_attitude, derived_thermo, ngdac, flight_model), but found {len(docs)}."
         )
 
     core = docs[0]
     flight = docs[1]
     thermo = docs[2]
     ngdac = docs[3]
+    flight_model = docs[4]
 
-    return core, flight, thermo, ngdac
+    return core, flight, thermo, ngdac, flight_model
 
 
 def _apply_qc_overrides(variables: dict, qc_overrides: dict) -> dict:
@@ -182,7 +185,7 @@ def load_config(file: str | None = None) -> dict:
         - flight: optional flight model parameters (empty dict if not set)
     """
     # Load core definitions
-    core, flight, thermo, ngdac = _load_core()
+    core, flight, thermo, ngdac, _ = _load_core()
 
     # Load user config
     if file is None:

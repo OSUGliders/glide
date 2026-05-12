@@ -526,3 +526,49 @@ platform:
     comment: Autonomous vehicle
     long_name: platform
     type: platform
+
+--- ### OPTIONAL SUITE: flight model (calculated)
+
+speed_through_water:
+  dtype: f4
+  CF:
+    long_name: Speed through water
+    units: m s-1
+    comment: Along-axis incident water speed from steady-state flight model
+    observation_type: calculated
+    valid_min: 0.0
+    valid_max: 2.0
+
+vertical_glider_velocity:
+  dtype: f4
+  CF:
+    long_name: Vertical glider velocity
+    units: m s-1
+    comment: >-
+      Vertical component of glider velocity through the water (upward
+      positive). Negative when diving, positive when climbing.
+    observation_type: calculated
+    valid_min: -1.0
+    valid_max: 1.0
+
+vertical_water_velocity:
+  dtype: f4
+  CF:
+    long_name: Vertical water velocity
+    units: m s-1
+    comment: >-
+      Vertical water velocity estimated as dz/dt minus modelled vertical
+      glider velocity (upward positive).
+    observation_type: calculated
+    valid_min: -1.0
+    valid_max: 1.0
+
+angle_of_attack:
+  dtype: f4
+  CF:
+    long_name: Angle of attack
+    units: degrees
+    comment: Angle of attack of glider relative to oncoming flow
+    observation_type: calculated
+    valid_min: -30.0
+    valid_max: 30.0

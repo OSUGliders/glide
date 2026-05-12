@@ -18,7 +18,7 @@ _INT_FILL = np.int32(-2147483647)
 
 
 def _load_ngdac_config() -> dict:
-    _, _, _, ngdac = _load_core()
+    _, _, _, ngdac, _ = _load_core()
     return ngdac
 
 

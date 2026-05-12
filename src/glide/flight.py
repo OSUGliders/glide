@@ -5,46 +5,58 @@ import logging
 import numpy as np
 import xarray as xr
 from scipy.interpolate import interp1d
-from scipy.optimize import fmin as fminimize
-from scipy.optimize import fsolve
+from scipy.optimize import fsolve, least_squares
+
+from .config import _load_core
 
 _log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Default model parameters
-# ---------------------------------------------------------------------------
 
+# Default model parameters
 DEFAULTS = dict(
     rho0=1025.0,  # reference density (kg m-3)
     mg=70.0,  # glider mass (kg)
-    Vg=0.070,  # glider volume (m3)
+    Vg=0.090,  # glider volume (m3)
     Cd0=0.15,  # parasitic drag coefficient (-)
-    ah=3.8,  # hull lift coefficient slope (rad-1)
     Cd1=10.0,  # induced drag coefficient (s-2); derived from aw if not set
-    aw=None,  # wing lift coefficient slope (rad-1); derived from AR/Omega
-    S=0.10,  # reference area (m-2)
-    AR=7.0,  # aspect ratio
-    Omega=0.7505,  # sweep angle (rad ≈ 43 degrees)
-    eOsborne=0.8,  # Osborne efficiency factor
     Cd1_hull=9.7,  # hull induced-drag coefficient
-    epsilon=5e-10,  # hull compressibility (Pa-1)
+    ah=3.8,  # hull lift coefficient slope rad-1)
+    aw=None,  # wing lift coefficient slope (rad-1); derived from aspect_ratio/Omega
+    reference_area=0.10,  # reference area (m-2)
+    aspect_ratio=7.0,  # aspect ratio
+    sweep_angle=0.7505,  # sweep angle (rad, approx 43 degrees)
+    osborne_efficiency=0.8,  # Osborne efficiency factor
+    hull_compressibility=5e-10,  # hull compressibility (Pa-1)
 )
 
-# Scale factors used internally by the optimiser to keep parameters near O(1).
-_SCALE = dict(Cd0=0.15, Vg=0.070, mg=70.0, ah=3.8, Cd1=10.0, aw=4.0)
+_G = 9.81  # gravity m s-2
 
-# Physical constants
-_G = 9.81  # m s-2
+# Physical bounds for calibratable parameters.
+BOUNDS: dict[str, tuple[float, float]] = dict(
+    mg=(40.0, 150.0),  # glider mass (kg)
+    Vg=(0.005, 0.2),  # glider volume (m3)
+    Cd0=(0.0, 2.0),  # parasitic drag coefficient
+    ah=(0.0, 10.0),  # hull lift slope (rad-1)
+    Cd1=(0.0, 100.0),  # induced drag coefficient
+    aw=(0.0, 30.0),  # wing lift slope (rad-1)
+)
 
 
-def _aw_from_geometry(AR: float, Omega: float) -> float:
+def _aw_from_geometry(aspect_ratio: float, sweep_angle: float) -> float:
     """Lift-curve slope from wing aspect ratio and sweep angle."""
-    return 2 * np.pi * AR / (2 + np.sqrt(AR**2 * (1 + np.tan(Omega) ** 2) + 4))
+    return (
+        2
+        * np.pi
+        * aspect_ratio
+        / (2 + np.sqrt(aspect_ratio**2 * (1 + np.tan(sweep_angle) ** 2) + 4))
+    )
 
 
-def _cd1_from_params(aw: float, eOsborne: float, AR: float, Cd1_hull: float) -> float:
+def _cd1_from_params(
+    aw: float, osborne_efficiency: float, aspect_ratio: float, Cd1_hull: float
+) -> float:
     """Induced drag coefficient from wing and hull contributions."""
-    Cd1_wing = aw**2 / (np.pi * eOsborne * AR)
+    Cd1_wing = aw**2 / (np.pi * osborne_efficiency * aspect_ratio)
     return Cd1_wing + Cd1_hull
 
 
@@ -53,46 +65,59 @@ def _build_params(cfg: dict) -> dict:
     p = {**DEFAULTS, **cfg}
 
     if p["aw"] is None:
-        p["aw"] = _aw_from_geometry(p["AR"], p["Omega"])
-        _log.debug("Derived aw = %.4f from AR and Omega", p["aw"])
+        p["aw"] = _aw_from_geometry(p["aspect_ratio"], p["sweep_angle"])
+        _log.debug("Derived aw = %.4f from aspect_ratio and sweep_angle", p["aw"])
 
     # Cd1 is derived unless the caller overrides it directly.
     if "Cd1" not in cfg:
-        p["Cd1"] = _cd1_from_params(p["aw"], p["eOsborne"], p["AR"], p["Cd1_hull"])
+        p["Cd1"] = _cd1_from_params(
+            p["aw"], p["osborne_efficiency"], p["aspect_ratio"], p["Cd1_hull"]
+        )
         _log.debug("Derived Cd1 = %.4f", p["Cd1"])
 
     return p
 
 
 def _compute_buoyancy(
-    pressure_Pa: np.ndarray, rho: np.ndarray, Vbp_m3: np.ndarray, p: dict
+    pressure_Pa: np.ndarray,
+    rho: np.ndarray,
+    Vbp_m3: np.ndarray,
+    Vg: float,
+    hull_compressibility: float,
+    mg: float,
 ) -> tuple[np.ndarray, float]:
-    """Return buoyancy force FB (N) and gravity force Fg (N)."""
-    FB = _G * rho * (p["Vg"] * (1.0 - p["epsilon"] * pressure_Pa) + Vbp_m3)
-    Fg = p["mg"] * _G
+    """Return buoyancy force FB (N) and gravity force Fg (N). Merchelbach et al. 2019 equation 3 & 4."""
+    FB = _G * rho * (Vg * (1.0 - hull_compressibility * pressure_Pa) + Vbp_m3)
+    Fg = mg * _G
     return FB, Fg
 
 
-def _aoa_equation(alpha: float, pitch_rad: float, p: dict) -> float:
-    """Implicit equation whose zero is the angle of attack."""
-    ah_aw = p["ah"] + p["aw"]
-    return (p["Cd0"] + p["Cd1"] * alpha**2) / (
-        ah_aw * np.tan(alpha + pitch_rad)
-    ) - alpha
+def _aoa_equation(
+    alpha: float, pitch_rad: float, Cd0: float, Cd1: float, ah: float, aw: float
+) -> float:
+    """Implicit equation whose zero is the angle of attack. Merchelbach et al. 2019 equation 9."""
+    return (Cd0 + Cd1 * alpha**2) / ((ah + aw) * np.tan(alpha + pitch_rad)) - alpha
 
 
-def _solve_aoa(pitch_rad: np.ndarray, p: dict) -> np.ndarray:
+def _solve_aoa(
+    pitch_rad: np.ndarray, Cd0: float, Cd1: float, ah: float, aw: float
+) -> np.ndarray:
     """Solve for angle of attack at each pitch sample.
 
     Builds an interpolating table over the pitch range for efficiency, then
-    applies it.  Pitches whose magnitude is below ~5° receive aoa = 0.
+    applies it.  Pitches whose magnitude is below ~5 degrees receive aoa = 0.
     """
     pitch_abs = np.abs(pitch_rad)
     pitch_grid = np.linspace(5 * np.pi / 180, 60 * np.pi / 180, 120)
 
     aoa_grid = np.zeros_like(pitch_grid)
     for i, _pitch in enumerate(pitch_grid):
-        sol = fsolve(_aoa_equation, _pitch / 50.0, args=(_pitch, p), full_output=True)
+        sol = fsolve(
+            _aoa_equation,
+            _pitch / 50.0,
+            args=(_pitch, Cd0, Cd1, ah, aw),
+            full_output=True,
+        )
         aoa_grid[i] = sol[0][0]
 
     ifun = interp1d(pitch_grid, aoa_grid, bounds_error=False, fill_value=0.0)
@@ -111,11 +136,13 @@ def _compute_speed(
     rho: np.ndarray,
     alpha: np.ndarray,
     pitch_rad: np.ndarray,
-    p: dict,
+    reference_area: float,
+    Cd0: float,
+    Cd1: float,
 ) -> np.ndarray:
-    """Incident water speed U (m s-1) from force balance."""
+    """Incident water speed U (m s-1) from force balance. Merchelbach et al. 2019 equation 8."""
     numer = 2.0 * (FB - Fg) * np.sin(pitch_rad + alpha)
-    denom = rho * p["S"] * (p["Cd0"] + p["Cd1"] * alpha**2)
+    denom = rho * reference_area * (Cd0 + Cd1 * alpha**2)
     U2 = np.where(denom != 0, numer / denom, 0.0)
     U2 = np.maximum(U2, 0.0)
     return np.sqrt(U2)
@@ -152,9 +179,13 @@ def _solve_flight_si(
     dict with keys: speed_through_water (m s⁻¹), vertical_glider_velocity
     (m s⁻¹), vertical_water_velocity (m s⁻¹), angle_of_attack (degrees).
     """
-    FB, Fg = _compute_buoyancy(pressure_Pa, density, Vbp_m3, p)
-    alpha = _solve_aoa(pitch_rad, p)
-    U = _compute_speed(FB, Fg, density, alpha, pitch_rad, p)
+    FB, Fg = _compute_buoyancy(
+        pressure_Pa, density, Vbp_m3, p["Vg"], p["hull_compressibility"], p["mg"]
+    )
+    alpha = _solve_aoa(pitch_rad, p["Cd0"], p["Cd1"], p["ah"], p["aw"])
+    U = _compute_speed(
+        FB, Fg, density, alpha, pitch_rad, p["reference_area"], p["Cd0"], p["Cd1"]
+    )
 
     # wg: vertical component of glider velocity through the water (upward +)
     # sin(pitch + alpha) is negative when diving (negative pitch), positive
@@ -205,23 +236,15 @@ def solve_flight(
     dict with keys: speed_through_water (m s⁻¹), vertical_glider_velocity
     (m s⁻¹), vertical_water_velocity (m s⁻¹), angle_of_attack (degrees).
     """
-    # --- unit conversion: glide native → SI -----------------------------------
     pressure_Pa = pressure_dbar * 1e4  # dbar → Pa
     pitch_rad = np.deg2rad(pitch_deg)  # degrees → radians
     Vbp_m3 = ballast_cm3 * 1e-6  # cm³ → m³
-    # z_m, density already in SI; time already in seconds
-    # --------------------------------------------------------------------------
 
     dzdt = np.gradient(z_m, time_s)  # dz/dt on full timeseries (upward +)
     return _solve_flight_si(pressure_Pa, dzdt, pitch_rad, Vbp_m3, density, p)
 
 
-# ---------------------------------------------------------------------------
-# Calibration
-# ---------------------------------------------------------------------------
-
-
-def _cost(
+def _residuals(
     x: np.ndarray,
     param_names: list[str],
     base_params: dict,
@@ -230,24 +253,23 @@ def _cost(
     pitch_rad: np.ndarray,
     Vbp_m3: np.ndarray,
     density: np.ndarray,
-) -> float:
-    """Mean-squared error of modelled vs observed vertical velocity.
-
-    All arrays contain only the calibration subset — no masking needed here.
-    """
+) -> np.ndarray:
+    """Residual vector (modelled minus observed vertical velocity) for least_squares."""
     p = {**base_params}
     for name, val in zip(param_names, x):
-        p[name] = val * _SCALE.get(name, 1.0)
+        p[name] = val
 
     # Re-derive Cd1 if any of its dependencies changed.
-    if any(n in param_names for n in ("aw", "eOsborne", "AR", "Cd1_hull")):
-        p["Cd1"] = _cd1_from_params(p["aw"], p["eOsborne"], p["AR"], p["Cd1_hull"])
+    if any(
+        n in param_names
+        for n in ("aw", "osborne_efficiency", "aspect_ratio", "Cd1_hull")
+    ):
+        p["Cd1"] = _cd1_from_params(
+            p["aw"], p["osborne_efficiency"], p["aspect_ratio"], p["Cd1_hull"]
+        )
 
     result = _solve_flight_si(pressure_Pa, dzdt, pitch_rad, Vbp_m3, density, p)
-    dzdt_mod = result["vertical_glider_velocity"]
-
-    residual = (dzdt_mod - dzdt) ** 2
-    return float(np.nanmean(residual))
+    return result["vertical_glider_velocity"] - dzdt
 
 
 def calibrate(ds: xr.Dataset, conf: dict) -> dict:
@@ -256,7 +278,7 @@ def calibrate(ds: xr.Dataset, conf: dict) -> dict:
     Parameters
     ----------
     ds : xr.Dataset
-        L2 dataset.  Must contain: pressure, pitch, ballast_pumped, density.
+        L2 dataset.  Must contain: pressure, pitch, ballast_pumped, density, z.
     conf : dict
         glide config dict (as returned by config.load_config).
 
@@ -276,8 +298,7 @@ def calibrate(ds: xr.Dataset, conf: dict) -> dict:
     # Drop rows with any NaN in the required variables.
     full = ds[required].dropna(dim="time", how="any")
 
-    # Compute dzdt on the full clean timeseries BEFORE subsetting, so that
-    # np.gradient sees a continuous sequence with no boundary discontinuities.
+    # Compute dzdt on the full clean timeseries
     time_s_full = full.time.values.astype("f8") / 1e9
     z_m_full = full.z.values.astype("f8")
     dzdt_full = np.gradient(z_m_full, time_s_full)
@@ -296,88 +317,48 @@ def calibrate(ds: xr.Dataset, conf: dict) -> dict:
         (sub.pressure > min_pressure) & (sub.pressure < max_pressure)
     ).dropna(dim="time", how="any")
 
-    if sub.time.size < 10:
+    if sub.time.size < 100:
         raise ValueError(
-            f"Too few data points ({sub.time.size}) after applying bounds. "
+            f"Fewer than 100 data points ({sub.time.size}) after applying bounds. "
             "Check flight.bounds in the config."
         )
 
-    # --- extract calibration arrays (already SI or no conversion needed) ------
-    pressure_Pa = sub.pressure.values.astype("f8") * 1e4  # dbar → Pa
-    dzdt = sub.dzdt.values.astype("f8")  # m s⁻¹, pre-computed
-    pitch_rad = np.deg2rad(sub.pitch.values.astype("f8"))  # degrees → radians
-    Vbp_m3 = sub.ballast_pumped.values.astype("f8") * 1e-6  # cm³ → m³
-    density = sub.density.values.astype("f8")
-    # --------------------------------------------------------------------------
+    pressure_Pa = sub.pressure.values.astype("f8") * 1e4  # dbar to Pa
+    dzdt = sub.dzdt.values.astype("f8")  # m s-1
+    pitch_rad = np.deg2rad(sub.pitch.values.astype("f8"))  # degrees to radians
+    Vbp_m3 = sub.ballast_pumped.values.astype("f8") * 1e-6  # cm3 to m3
+    density = sub.density.values.astype("f8")  # already kg m-3
 
-    # --- optimisation ---------------------------------------------------------
     calibrate_params = flight_cfg.get("calibrate", ["Vg", "mg", "Cd0", "ah"])
     _log.info("Calibrating parameters: %s", calibrate_params)
 
-    x0 = np.array([p[name] / _SCALE.get(name, 1.0) for name in calibrate_params])
+    x0 = np.array([p[name] for name in calibrate_params])
+    lb = np.array([BOUNDS.get(name, (-np.inf, np.inf))[0] for name in calibrate_params])
+    ub = np.array([BOUNDS.get(name, (-np.inf, np.inf))[1] for name in calibrate_params])
 
     args = (calibrate_params, p, pressure_Pa, dzdt, pitch_rad, Vbp_m3, density)
 
-    result = fminimize(_cost, x0, args=args, disp=False, xtol=1e-5)
+    result = least_squares(
+        _residuals, x0, args=args, bounds=(lb, ub), x_scale="jac", method="trf"
+    )
 
-    for name, val in zip(calibrate_params, result):
-        p[name] = val * _SCALE.get(name, 1.0)
+    for name, val in zip(calibrate_params, result.x):
+        p[name] = val
 
     # Re-derive Cd1 in case dependent params changed.
-    if any(n in calibrate_params for n in ("aw", "eOsborne", "AR", "Cd1_hull")):
-        p["Cd1"] = _cd1_from_params(p["aw"], p["eOsborne"], p["AR"], p["Cd1_hull"])
+    if any(
+        n in calibrate_params
+        for n in ("aw", "osborne_efficiency", "aspect_ratio", "Cd1_hull")
+    ):
+        p["Cd1"] = _cd1_from_params(
+            p["aw"], p["osborne_efficiency"], p["aspect_ratio"], p["Cd1_hull"]
+        )
 
     _log.info(
         "Calibration complete: %s",
         {n: f"{p[n]:.5g}" for n in calibrate_params},
     )
     return p
-
-
-# ---------------------------------------------------------------------------
-# Apply model to full dataset
-# ---------------------------------------------------------------------------
-
-_OUTPUT_ATTRS = dict(
-    speed_through_water=dict(
-        long_name="Speed through water",
-        units="m s-1",
-        comment="Along-axis incident water speed from steady-state flight model",
-        observation_type="calculated",
-        valid_min=0.0,
-        valid_max=2.0,
-    ),
-    vertical_glider_velocity=dict(
-        long_name="Vertical glider velocity",
-        units="m s-1",
-        comment=(
-            "Vertical component of glider velocity through the water (upward "
-            "positive). Negative when diving, positive when climbing."
-        ),
-        observation_type="calculated",
-        valid_min=-1.0,
-        valid_max=1.0,
-    ),
-    vertical_water_velocity=dict(
-        long_name="Vertical water velocity",
-        units="m s-1",
-        comment=(
-            "Vertical water velocity estimated as dz/dt minus modelled vertical "
-            "glider velocity (upward positive)."
-        ),
-        observation_type="calculated",
-        valid_min=-1.0,
-        valid_max=1.0,
-    ),
-    angle_of_attack=dict(
-        long_name="Angle of attack",
-        units="degrees",
-        comment="Angle of attack of glider relative to oncoming flow",
-        observation_type="calculated",
-        valid_min=-30.0,
-        valid_max=30.0,
-    ),
-)
 
 
 def apply_model(ds: xr.Dataset, params: dict) -> xr.Dataset:
@@ -416,8 +397,9 @@ def apply_model(ds: xr.Dataset, params: dict) -> xr.Dataset:
 
     out = ds.copy()
 
+    _, _, _, _, flight_vars = _load_core()
     for var_name, values in result.items():
-        attrs = _OUTPUT_ATTRS[var_name]
+        attrs = flight_vars[var_name]["CF"]
         out[var_name] = (("time",), values.astype("f4"), attrs)
 
     # Store all model parameters as global attributes.
@@ -428,12 +410,12 @@ def apply_model(ds: xr.Dataset, params: dict) -> xr.Dataset:
         "ah",
         "Cd1",
         "aw",
-        "S",
-        "AR",
-        "Omega",
-        "eOsborne",
+        "reference_area",
+        "aspect_ratio",
+        "sweep_angle",
+        "osborne_efficiency",
         "Cd1_hull",
-        "epsilon",
+        "hull_compressibility",
         "rho0",
     ]
     for key in _param_keys:

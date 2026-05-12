@@ -44,13 +44,15 @@ def minimal_conf(overrides: dict | None = None) -> dict:
 
 
 def test_aw_from_geometry():
-    aw = fl._aw_from_geometry(AR=7.0, Omega=0.7505)
+    aw = fl._aw_from_geometry(aspect_ratio=7.0, sweep_angle=0.7505)
     assert 3.0 < aw < 5.0, f"Unexpected aw={aw}"
 
 
 def test_cd1_from_params():
     aw = fl._aw_from_geometry(7.0, 0.7505)
-    cd1 = fl._cd1_from_params(aw, eOsborne=0.8, AR=7.0, Cd1_hull=9.7)
+    cd1 = fl._cd1_from_params(
+        aw, osborne_efficiency=0.8, aspect_ratio=7.0, Cd1_hull=9.7
+    )
     assert cd1 > 0
 
 
@@ -69,21 +71,21 @@ def test_build_params_respects_user_cd1():
 def test_solve_aoa_positive_pitch():
     p = fl._build_params({})
     pitch = np.full(10, np.deg2rad(20.0))
-    aoa = fl._solve_aoa(pitch, p)
+    aoa = fl._solve_aoa(pitch, p["Cd0"], p["Cd1"], p["ah"], p["aw"])
     assert np.all(aoa >= 0)
 
 
 def test_solve_aoa_negative_pitch():
     p = fl._build_params({})
     pitch = np.full(10, np.deg2rad(-20.0))
-    aoa = fl._solve_aoa(pitch, p)
+    aoa = fl._solve_aoa(pitch, p["Cd0"], p["Cd1"], p["ah"], p["aw"])
     assert np.all(aoa <= 0)
 
 
 def test_solve_aoa_zero_pitch():
     p = fl._build_params({})
     pitch = np.zeros(5)
-    aoa = fl._solve_aoa(pitch, p)
+    aoa = fl._solve_aoa(pitch, p["Cd0"], p["Cd1"], p["ah"], p["aw"])
     assert np.allclose(aoa, 0.0)
 
 
@@ -154,7 +156,7 @@ def test_calibrate_params_are_finite():
 def test_calibrate_bounds_too_restrictive_raises():
     ds = get_l2()
     conf = minimal_conf({"bounds": {"min_pressure": 500.0, "max_pressure": 501.0}})
-    with pytest.raises(ValueError, match="Too few data points"):
+    with pytest.raises(ValueError, match="Fewer than 100 data points"):
         fl.calibrate(ds, conf)
 
 
