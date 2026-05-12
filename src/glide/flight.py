@@ -397,7 +397,7 @@ def apply_model(ds: xr.Dataset, params: dict) -> xr.Dataset:
 
     out = ds.copy()
 
-    _, _, _, _, flight_vars = _load_core()
+    flight_vars = _load_core()["suites"]["flight_model"]
     for var_name, values in result.items():
         attrs = flight_vars[var_name]["CF"]
         out[var_name] = (("time",), values.astype("f4"), attrs)

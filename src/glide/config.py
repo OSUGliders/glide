@@ -4,7 +4,7 @@ import copy
 import logging
 from datetime import datetime, timezone
 
-from yaml import safe_load_all
+from yaml import safe_load, safe_load_all
 
 _log = logging.getLogger(__name__)
 
@@ -39,42 +39,33 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def _load_core() -> tuple[dict, dict, dict, dict, dict]:
+def _load_core() -> dict:
     """Load core variable definitions from bundled core.yml.
 
-    Returns
-    -------
-    core_variables : dict
-        Core variables that are always included.
-    flight_attitude : dict
-        Optional flight attitude variables (heading, pitch, roll).
-    derived_thermo : dict
-        Optional derived thermodynamic variables.
-    ngdac : dict
-        IOOS NGDAC structural configuration.
-    flight_model : dict
-        Output variable definitions for the steady-state flight model.
+    Returns a dict with keys ``core``, ``ngdac``, and ``suites``.  Callers
+    index what they need:
+
+        raw = _load_core()
+        raw["core"]               # always-included variables
+        raw["ngdac"]              # IOOS NGDAC structural variables
+        raw["suites"]["flight"]   # one optional suite
+        raw["suites"]             # all suites, for generic iteration
     """
     from importlib import resources
 
     core_file = str(resources.files("glide").joinpath("assets/core.yml"))
-
     with open(core_file) as f:
-        docs = [doc for doc in safe_load_all(f)]
+        return safe_load(f)
 
-    if len(docs) != 5:
-        raise ValueError(
-            f"Expected core.yml to contain exactly 5 YAML documents (core, "
-            f"flight_attitude, derived_thermo, ngdac, flight_model), but found {len(docs)}."
-        )
 
-    core = docs[0]
-    flight = docs[1]
-    thermo = docs[2]
-    ngdac = docs[3]
-    flight_model = docs[4]
-
-    return core, flight, thermo, ngdac, flight_model
+def _merge_suites(core: dict, suites: dict, include: dict) -> dict:
+    """Merge enabled optional suites into the core variable set."""
+    variables = copy.deepcopy(core)
+    for name, suite_vars in suites.items():
+        if include.get(name, False):
+            variables.update(copy.deepcopy(suite_vars))
+            _log.debug("Including %s suite", name)
+    return variables
 
 
 def _apply_qc_overrides(variables: dict, qc_overrides: dict) -> dict:
@@ -185,7 +176,10 @@ def load_config(file: str | None = None) -> dict:
         - flight: optional flight model parameters (empty dict if not set)
     """
     # Load core definitions
-    core, flight, thermo, ngdac, _ = _load_core()
+    raw_core = _load_core()
+    core = raw_core["core"]
+    ngdac = raw_core["ngdac"]
+    suites = raw_core.get("suites", {})
 
     # Load user config
     if file is None:
@@ -209,19 +203,8 @@ def load_config(file: str | None = None) -> dict:
     merged_vars = _section("merged_variables")
     flight_model_cfg = _section("flight")
 
-    include_flight = include.get("flight", True)
-    include_thermo = include.get("thermo", True)
-
-    # Build variable set: start with core
-    variables = copy.deepcopy(core)
-
-    # Add optional suites if enabled
-    if include_flight:
-        variables.update(copy.deepcopy(flight))
-        _log.debug("Including flight_attitude suite")
-    if include_thermo:
-        variables.update(copy.deepcopy(thermo))
-        _log.debug("Including derived_thermo suite")
+    # Build variable set: core + enabled optional suites
+    variables = _merge_suites(core, suites, include)
 
     # Apply QC overrides
     variables = _apply_qc_overrides(variables, qc_overrides)
@@ -259,10 +242,7 @@ def load_config(file: str | None = None) -> dict:
         merged_variables=merged_vars,
         instruments=instruments,
         ngdac=ngdac,
-        include=dict(
-            flight=include_flight,
-            thermo=include_thermo,
-        ),
+        include=include,
         flight=flight_model_cfg,
     )
 

@@ -191,11 +191,11 @@ merged_variables:
 # attributes prefixed with `flight_model_` in the output file.
 
 # flight:
-#   rho0: 1025.0        # reference density (kg m⁻³)
+#   rho0: 1025.0        # reference density (kg m-3)
 #   mg: 70.0            # (*) glider mass (kg)
-#   Vg: 0.070           # (*) glider volume (m³)
+#   Vg: 0.070           # (*) glider volume (m3)
 #   Cd0: 0.15           # (*) parasitic drag coefficient
-#   ah: 3.8             # (*) hull lift slope (rad⁻¹)
+#   ah: 3.8             # (*) hull lift slope (rad-1)
 #   calibrate:
 #     - Vg
 #     - mg
