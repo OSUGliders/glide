@@ -1,5 +1,5 @@
 [project]
-name = "glide"
+name = "slocum-glide"
 version = "0.1.0"
 description = "Process Slocum glider data"
 readme = "README.md"

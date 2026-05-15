@@ -222,9 +222,6 @@ def _solve_flight(
         FB, Fg, density, alpha, pitch, p["reference_area"], p["Cd0"], p["Cd1"]
     )
 
-    # wg: vertical component of glider velocity through the water (upward +)
-    # sin(pitch + alpha) is negative when diving (negative pitch), positive
-    # when climbing — matching the z convention.
     wg = U * np.sin(pitch + alpha)
     ww = dzdt - wg  # vertical water velocity
 
