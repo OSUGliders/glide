@@ -482,65 +482,6 @@ wheels = [
 ]
 
 [[package]]
-name = "glide"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "bottleneck" },
-    { name = "dask" },
-    { name = "flox" },
-    { name = "gsw" },
-    { name = "netcdf4" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "profinder" },
-    { name = "pyyaml" },
-    { name = "scipy" },
-    { name = "typer-slim" },
-    { name = "xarray" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "compliance-checker" },
-    { name = "ipykernel" },
-    { name = "matplotlib" },
-    { name = "mypy" },
-    { name = "pandas-stubs" },
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "types-pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "bottleneck", specifier = ">=1.4.2" },
-    { name = "dask", specifier = ">=2025.2.0" },
-    { name = "flox", specifier = ">=0.10.0" },
-    { name = "gsw", specifier = ">=3.6.19" },
-    { name = "netcdf4", specifier = ">=1.7.2" },
-    { name = "numpy", specifier = ">=2.2.2" },
-    { name = "pandas", specifier = ">=2.2.3" },
-    { name = "profinder", specifier = "==0.2.5" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "scipy", specifier = ">=1.15.1" },
-    { name = "typer-slim", specifier = ">=0.15.2" },
-    { name = "xarray", specifier = ">=2025.1.2" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "compliance-checker", specifier = ">=5.4.2" },
-    { name = "ipykernel", specifier = ">=6.29.5" },
-    { name = "matplotlib", specifier = ">=3.10.0" },
-    { name = "mypy", specifier = ">=1.15.0" },
-    { name = "pandas-stubs", specifier = ">=2.2.3.241126" },
-    { name = "pytest", specifier = ">=8.3.4" },
-    { name = "ruff", specifier = ">=0.9.5" },
-    { name = "types-pyyaml", specifier = ">=6.0.12.20241230" },
-]
-
-[[package]]
 name = "gsw"
 version = "3.6.19"
 source = { registry = "https://pypi.org/simple" }
@@ -2006,6 +1947,65 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "slocum-glide"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "bottleneck" },
+    { name = "dask" },
+    { name = "flox" },
+    { name = "gsw" },
+    { name = "netcdf4" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "profinder" },
+    { name = "pyyaml" },
+    { name = "scipy" },
+    { name = "typer-slim" },
+    { name = "xarray" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "compliance-checker" },
+    { name = "ipykernel" },
+    { name = "matplotlib" },
+    { name = "mypy" },
+    { name = "pandas-stubs" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bottleneck", specifier = ">=1.4.2" },
+    { name = "dask", specifier = ">=2025.2.0" },
+    { name = "flox", specifier = ">=0.10.0" },
+    { name = "gsw", specifier = ">=3.6.19" },
+    { name = "netcdf4", specifier = ">=1.7.2" },
+    { name = "numpy", specifier = ">=2.2.2" },
+    { name = "pandas", specifier = ">=2.2.3" },
+    { name = "profinder", specifier = "==0.2.5" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "scipy", specifier = ">=1.15.1" },
+    { name = "typer-slim", specifier = ">=0.15.2" },
+    { name = "xarray", specifier = ">=2025.1.2" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "compliance-checker", specifier = ">=5.4.2" },
+    { name = "ipykernel", specifier = ">=6.29.5" },
+    { name = "matplotlib", specifier = ">=3.10.0" },
+    { name = "mypy", specifier = ">=1.15.0" },
+    { name = "pandas-stubs", specifier = ">=2.2.3.241126" },
+    { name = "pytest", specifier = ">=8.3.4" },
+    { name = "ruff", specifier = ">=0.9.5" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20241230" },
 ]
 
 [[package]]

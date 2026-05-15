@@ -1,5 +1,5 @@
 [project]
-name = "glide"
+name = "slocum-glide"
 version = "0.1.0"
 description = "Process Slocum glider data"
 readme = "README.md"
@@ -21,6 +21,15 @@ dependencies = [
     "typer-slim>=0.15.2",
     "xarray>=2025.1.2",
 ]
+license = "GPL-3.0-or-later"
+license-files = ["LICEN[CS]E*"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+source-code = "https://github.com/OSUgliders/glide"
 
 [project.scripts]
 glide = "glide.cli:app"
@@ -28,6 +37,9 @@ glide = "glide.cli:app"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/glide"]
 
 [dependency-groups]
 dev = [
