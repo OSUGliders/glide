@@ -26,6 +26,21 @@ def rad_to_deg(x: ArrayLike) -> NDArray:
     return np.rad2deg(x)
 
 
+def deg_to_rad(x: ArrayLike) -> NDArray:
+    """Convert degrees to radians."""
+    return np.deg2rad(x)
+
+
+def dbar_to_Pa(x: ArrayLike) -> NDArray:
+    """Convert pressure in dbar to Pa."""
+    return 1e4 * np.asarray(x)
+
+
+def cm3_to_m3(x: ArrayLike) -> NDArray:
+    """Convert volume in cm3 to m3."""
+    return 1e-6 * np.asarray(x)
+
+
 def mid(x: ArrayLike) -> NDArray:
     """Estimate mid points of an array. Works with datetimes."""
     x = np.asarray(x)

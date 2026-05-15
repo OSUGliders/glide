@@ -2,527 +2,588 @@
 # This file is bundled with the package and should not be edited by users.
 # Variable formatting follows IOOS national glider DAC netCDF format version 2
 # https://ioos.github.io/glider-dac/ngdac-netcdf-file-format-version-2
+#
+# Structure:
+#   core    — variables always extracted/derived (never toggled off)
+#   ngdac   — IOOS NGDAC structural variables (crs, profile_time, etc.)
+#   suites  — optional variable groups; each key matches a toggle in config.yml include:
 
-# Dashes (---) indicate separate yaml documents.
+# =============================================================================
+# CORE VARIABLES (always included)
+# =============================================================================
 
---- ### CORE VARIABLES (always extracted)
+core:
 
-# MEASURED — extracted directly from raw glider files (have a `source` field)
+  # MEASURED — extracted directly from raw glider files (have a `source` field)
 
-time:
-  source: ["m_present_time", "sci_m_present_time"]
-  track_qc: True
-  CF:
-    long_name: Time
-    standard_name: time
-    calendar: gregorian
-    units: seconds since 1970-01-01T00:00:00Z
-    axis: T
-    observation_type: measured
-    valid_min: 2000-01-01T00:00:00
-    valid_max: 2040-01-01T00:00:00
+  time:
+    source: ["m_present_time", "sci_m_present_time"]
+    track_qc: True
+    CF:
+      long_name: Time
+      standard_name: time
+      calendar: gregorian
+      units: seconds since 1970-01-01T00:00:00Z
+      axis: T
+      observation_type: measured
+      valid_min: 2000-01-01T00:00:00
+      valid_max: 2040-01-01T00:00:00
 
-lat:
-  source: m_lat
-  conversion: dpm_to_dd
-  interpolate_missing: True
-  max_gap: 600
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Latitude
-    standard_name: latitude
-    units: degrees_north
-    axis: Y
-    comment: "Estimated between surface fixes"
-    observation_type: measured
-    platform: platform
-    reference: WGS84
-    valid_max: 90.0
-    valid_min: -90.0
-    coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+  lat:
+    source: m_lat
+    conversion: dpm_to_dd
+    interpolate_missing: True
+    max_gap: 600
+    track_qc: True
+    dtype: f4
+    CF:
+      long_name: Latitude
+      standard_name: latitude
+      units: degrees_north
+      axis: Y
+      comment: "Estimated between surface fixes"
+      observation_type: measured
+      platform: platform
+      reference: WGS84
+      valid_max: 90.0
+      valid_min: -90.0
+      coordinate_reference_frame: urn:ogc:crs:EPSG::4326
 
-lon:
-  source: m_lon
-  conversion: dpm_to_dd
-  interpolate_missing: True
-  max_gap: 600
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Longitude
-    standard_name: longitude
-    units: degrees_east
-    axis: X
-    comment: "Estimated between surface fixes"
-    observation_type: measured
-    platform: platform
-    reference: WGS84
-    valid_max: 180.0
-    valid_min: -180.0
-    coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+  lon:
+    source: m_lon
+    conversion: dpm_to_dd
+    interpolate_missing: True
+    max_gap: 600
+    track_qc: True
+    dtype: f4
+    CF:
+      long_name: Longitude
+      standard_name: longitude
+      units: degrees_east
+      axis: X
+      comment: "Estimated between surface fixes"
+      observation_type: measured
+      platform: platform
+      reference: WGS84
+      valid_max: 180.0
+      valid_min: -180.0
+      coordinate_reference_frame: urn:ogc:crs:EPSG::4326
 
-lat_gps:
-  source: m_gps_lat
-  conversion: dpm_to_dd
-  drop_from_l2: True  # Excluded from science-time interpolation; placed on time_gps by add_gps_fixes
-  drop_from_l3: True
-  dtype: f4
-  CF:
-    long_name: Latitude
-    standard_name: latitude
-    units: degrees_north
-    axis: Y
-    comment: "Surface GPS fixes"
-    observation_type: measured
-    platform: platform
-    reference: WGS84
-    valid_max: 90.0
-    valid_min: -90.0
-    coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+  lat_gps:
+    source: m_gps_lat
+    conversion: dpm_to_dd
+    drop_from_l2: True  # Excluded from science-time interpolation; placed on time_gps by add_gps_fixes
+    drop_from_l3: True
+    dtype: f4
+    CF:
+      long_name: Latitude
+      standard_name: latitude
+      units: degrees_north
+      axis: Y
+      comment: "Surface GPS fixes"
+      observation_type: measured
+      platform: platform
+      reference: WGS84
+      valid_max: 90.0
+      valid_min: -90.0
+      coordinate_reference_frame: urn:ogc:crs:EPSG::4326
 
-lon_gps:
-  source: m_gps_lon
-  conversion: dpm_to_dd
-  drop_from_l2: True  # Excluded from science-time interpolation; placed on time_gps by add_gps_fixes
-  drop_from_l3: True
-  dtype: f4
-  CF:
-    long_name: Longitude
-    standard_name: longitude
-    units: degrees_east
-    axis: X
-    comment: "Surface GPS fixes"
-    observation_type: measured
-    platform: platform
-    reference: WGS84
-    valid_max: 180.0
-    valid_min: -180.0
-    coordinate_reference_frame: urn:ogc:crs:EPSG::4326
+  lon_gps:
+    source: m_gps_lon
+    conversion: dpm_to_dd
+    drop_from_l2: True  # Excluded from science-time interpolation; placed on time_gps by add_gps_fixes
+    drop_from_l3: True
+    dtype: f4
+    CF:
+      long_name: Longitude
+      standard_name: longitude
+      units: degrees_east
+      axis: X
+      comment: "Surface GPS fixes"
+      observation_type: measured
+      platform: platform
+      reference: WGS84
+      valid_max: 180.0
+      valid_min: -180.0
+      coordinate_reference_frame: urn:ogc:crs:EPSG::4326
 
-m_depth:
-  source: m_depth
-  drop_from_l2: True
-  CF:
-    long_name: Depth
-    standard_name: depth
-    units: m
-    valid_min: 0.0
-    valid_max: 2000.0
-    positive: down
-    reference_datum: sea-surface
-    instrument: instrument_ctd
-    observation_type: measured
+  m_depth:
+    source: m_depth
+    drop_from_l2: True
+    CF:
+      long_name: Depth
+      standard_name: depth
+      units: m
+      valid_min: 0.0
+      valid_max: 2000.0
+      positive: down
+      reference_datum: sea-surface
+      instrument: instrument_ctd
+      observation_type: measured
 
-pressure:
-  source: sci_water_pressure
-  conversion: bar_to_dbar
-  interpolate_missing: True
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Pressure
-    standard_name: sea_water_pressure
-    units: dbar
-    valid_min: 0.0
-    valid_max: 2000.0
-    positive: down
-    reference_datum: sea-surface
-    instrument: instrument_ctd
-    observation_type: measured
-    accuracy: 1.0
-    precision: 2.0
-    resolution: 0.02
-    comment: "ctd pressure sensor"
+  pressure:
+    source: sci_water_pressure
+    conversion: bar_to_dbar
+    interpolate_missing: True
+    track_qc: True
+    dtype: f4
+    CF:
+      long_name: Pressure
+      standard_name: sea_water_pressure
+      units: dbar
+      valid_min: 0.0
+      valid_max: 2000.0
+      positive: down
+      reference_datum: sea-surface
+      instrument: instrument_ctd
+      observation_type: measured
+      accuracy: 1.0
+      precision: 2.0
+      resolution: 0.02
+      comment: "ctd pressure sensor"
 
-conductivity:
-  source: sci_water_cond
-  interpolate_missing: True
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Conductivity
-    standard_name: sea_water_electrical_conductivity
-    units: S m-1
-    instrument: instrument_ctd
-    valid_min: 0.1
-    valid_max: 10.0
-    observation_type: measured
-    accuracy: 0.0003
-    precision: 0.0001
-    resolution: 0.00002
+  conductivity:
+    source: sci_water_cond
+    interpolate_missing: True
+    track_qc: True
+    dtype: f4
+    CF:
+      long_name: Conductivity
+      standard_name: sea_water_electrical_conductivity
+      units: S m-1
+      instrument: instrument_ctd
+      valid_min: 0.1
+      valid_max: 10.0
+      observation_type: measured
+      accuracy: 0.0003
+      precision: 0.0001
+      resolution: 0.00002
 
-temperature:
-  source: sci_water_temp
-  interpolate_missing: True
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Temperature
-    standard_name: sea_water_temperature
-    units: celsius
-    instrument: instrument_ctd
-    valid_min: -5.0
-    valid_max: 50.0
-    observation_type: measured
-    accuracy: 0.002
-    precision: 0.001
-    resolution: 0.0002
+  temperature:
+    source: sci_water_temp
+    interpolate_missing: True
+    track_qc: True
+    dtype: f4
+    CF:
+      long_name: Temperature
+      standard_name: sea_water_temperature
+      units: celsius
+      instrument: instrument_ctd
+      valid_min: -5.0
+      valid_max: 50.0
+      observation_type: measured
+      accuracy: 0.002
+      precision: 0.001
+      resolution: 0.0002
 
-pitch:
-  source: m_pitch
-  conversion: rad_to_deg
-  interpolate_missing: True
-  dtype: f4
-  CF:
-    long_name: Pitch
-    standard_name: platform_pitch_fore_up
-    units: degrees
-    observation_type: measured
-    valid_max: 180.0
-    valid_min: -180.0
+  pitch:
+    source: m_pitch
+    conversion: rad_to_deg
+    interpolate_missing: True
+    dtype: f4
+    CF:
+      long_name: Pitch
+      standard_name: platform_pitch_fore_up
+      units: degrees
+      observation_type: measured
+      valid_max: 180.0
+      valid_min: -180.0
 
-roll:
-  source: m_roll
-  conversion: rad_to_deg
-  interpolate_missing: True
-  dtype: f4
-  CF:
-    long_name: Roll
-    standard_name: platform_roll_starboard_down
-    units: degrees
-    observation_type: measured
-    valid_max: 180.0
-    valid_min: -180.0
+  roll:
+    source: m_roll
+    conversion: rad_to_deg
+    interpolate_missing: True
+    dtype: f4
+    CF:
+      long_name: Roll
+      standard_name: platform_roll_starboard_down
+      units: degrees
+      observation_type: measured
+      valid_max: 180.0
+      valid_min: -180.0
 
-# PIPELINE — added by named processing functions (no `source` field)
+  # PIPELINE — added by named processing functions (no `source` field)
 
-# GPS coordinates (add_gps_fixes): valid surface fixes on a dedicated time_gps dimension
-# See config.yml for instructions on adding companion variables to time_gps.
+  # GPS coordinates (add_gps_fixes): valid surface fixes on a dedicated time_gps dimension
+  # See config.yml for instructions on adding companion variables to time_gps.
 
-time_gps:
-  anchor: [lat_gps, lon_gps]  # defines the valid-fix mask for this dimension
-  drop_from_l3: True
-  CF:
-    calendar: gregorian
-    long_name: GPS Fix Time
-    observation_type: measured
-    source_sensor: m_present_time
-    standard_name: time
-    units: seconds since 1970-01-01T00:00:00Z
+  time_gps:
+    anchor: [lat_gps, lon_gps]  # defines the valid-fix mask for this dimension
+    drop_from_l3: True
+    CF:
+      calendar: gregorian
+      long_name: GPS Fix Time
+      observation_type: measured
+      source_sensor: m_present_time
+      standard_name: time
+      units: seconds since 1970-01-01T00:00:00Z
 
-# Depth-averaged velocity (add_velocity): one value per dive cycle on time_uv dimension
+  # Depth-averaged velocity (add_velocity): one value per dive cycle on time_uv dimension
 
-u:
-  dtype: f4
-  CF:
-    comment: "The depth-averaged current is an estimate of the net current measured while the glider is underwater. The value is calculated over the entire underwater segment, which may consist of 1 or more dives."
-    long_name: Depth-Averaged Eastward Sea Water Velocity
-    observation_type: calculated
-    platform: platform
-    source_sensor: m_water_vx
-    standard_name: eastward_sea_water_velocity
-    units: m s-1
-    valid_max: 10.0
-    valid_min: -10.0
+  u:
+    dtype: f4
+    CF:
+      comment: "The depth-averaged current is an estimate of the net current measured while the glider is underwater. The value is calculated over the entire underwater segment, which may consist of 1 or more dives."
+      long_name: Depth-Averaged Eastward Sea Water Velocity
+      observation_type: calculated
+      platform: platform
+      source_sensor: m_water_vx
+      standard_name: eastward_sea_water_velocity
+      units: m s-1
+      valid_max: 10.0
+      valid_min: -10.0
 
-v:
-  dtype: f4
-  CF:
-    comment: "The depth-averaged current is an estimate of the net current measured while the glider is underwater. The value is calculated over the entire underwater segment, which may consist of 1 or more dives."
-    long_name: Depth-Averaged Northward Sea Water Velocity
-    observation_type: calculated
-    platform: platform
-    source_sensor: m_water_vy
-    standard_name: northward_sea_water_velocity
-    units: m s-1
-    valid_max: 10.0
-    valid_min: -10.0
+  v:
+    dtype: f4
+    CF:
+      comment: "The depth-averaged current is an estimate of the net current measured while the glider is underwater. The value is calculated over the entire underwater segment, which may consist of 1 or more dives."
+      long_name: Depth-Averaged Northward Sea Water Velocity
+      observation_type: calculated
+      platform: platform
+      source_sensor: m_water_vy
+      standard_name: northward_sea_water_velocity
+      units: m s-1
+      valid_max: 10.0
+      valid_min: -10.0
 
-time_uv:
-  CF:
-    calendar: gregorian
-    comment: "The depth-averaged current is an estimate of the net current measured while the glider is underwater. The value is calculated over the entire underwater segment, which may consist of 1 or more dives."
-    long_name: Depth-Averaged Time
-    observation_type: calculated
-    source_sensor: m_present_time
-    standard_name: time
-    units: seconds since 1970-01-01T00:00:00Z
+  time_uv:
+    CF:
+      calendar: gregorian
+      comment: "The depth-averaged current is an estimate of the net current measured while the glider is underwater. The value is calculated over the entire underwater segment, which may consist of 1 or more dives."
+      long_name: Depth-Averaged Time
+      observation_type: calculated
+      source_sensor: m_present_time
+      standard_name: time
+      units: seconds since 1970-01-01T00:00:00Z
 
-lat_uv:
-  dtype: f4
-  CF:
-    comment: "The depth-averaged current is an estimate of the net current measured while the glider is underwater. The value is calculated over the entire underwater segment, which may consist of 1 or more dives."
-    long_name: Depth-Averaged Latitude
-    observation_type: calculated
-    platform: platform
-    source_sensor: m_gps_lat
-    standard_name: latitude
-    units: degrees_north
-    valid_max: 90.0
-    valid_min: -90.0
+  lat_uv:
+    dtype: f4
+    CF:
+      comment: "The depth-averaged current is an estimate of the net current measured while the glider is underwater. The value is calculated over the entire underwater segment, which may consist of 1 or more dives."
+      long_name: Depth-Averaged Latitude
+      observation_type: calculated
+      platform: platform
+      source_sensor: m_gps_lat
+      standard_name: latitude
+      units: degrees_north
+      valid_max: 90.0
+      valid_min: -90.0
 
-lon_uv:
-  dtype: f4
-  CF:
-    comment: "The depth-averaged current is an estimate of the net current measured while the glider is underwater. The value is calculated over the entire underwater segment, which may consist of 1 or more dives."
-    long_name: Depth-Averaged Longitude
-    observation_type: calculated
-    platform: platform
-    source_sensor: m_gps_lon
-    standard_name: longitude
-    units: degrees_east
-    valid_max: 180.0
-    valid_min: -180.0
+  lon_uv:
+    dtype: f4
+    CF:
+      comment: "The depth-averaged current is an estimate of the net current measured while the glider is underwater. The value is calculated over the entire underwater segment, which may consist of 1 or more dives."
+      long_name: Depth-Averaged Longitude
+      observation_type: calculated
+      platform: platform
+      source_sensor: m_gps_lon
+      standard_name: longitude
+      units: degrees_east
+      valid_max: 180.0
+      valid_min: -180.0
 
-# Profile identification (get_profiles): dive/climb labels on the main time dimension
+  # Profile identification (get_profiles): dive/climb labels on the main time dimension
 
-dive_id:
-  dtype: i4
-  CF:
-    long_name: Dive ID
-    comment: "Unique identifier for each dive profile, starting from 1. -1 indicates no dive."
+  dive_id:
+    dtype: i4
+    CF:
+      long_name: Dive ID
+      comment: "Unique identifier for each dive profile, starting from 1. -1 indicates no dive."
 
-climb_id:
-  dtype: i4
-  CF:
-    long_name: Climb ID
-    comment: "Unique identifier for each climb profile, starting from 1. -1 indicates no climb."
+  climb_id:
+    dtype: i4
+    CF:
+      long_name: Climb ID
+      comment: "Unique identifier for each climb profile, starting from 1. -1 indicates no climb."
 
-profile_id:
-  dtype: i4
-  CF:
-    long_name: Profile ID
-    comment: "Unique identifier for each profile (one descent or one ascent), starting from 1 in time order. -1 indicates no profile. Reduced to a scalar in IOOS NGDAC profile files. Profiles sharing a surface-to-surface segment can be identified by sharing the same time_uv value."
+  profile_id:
+    dtype: i4
+    CF:
+      long_name: Profile ID
+      comment: "Unique identifier for each profile (one descent or one ascent), starting from 1 in time order. -1 indicates no profile. Reduced to a scalar in IOOS NGDAC profile files. Profiles sharing a surface-to-surface segment can be identified by sharing the same time_uv value."
 
-state:
-  dtype: i1
-  CF:
-    long_name: Glider State
-    comment: "Glider state: -1=unknown, 0=surface, 1=dive, 2=climb"
-    flag_values: [-1, 0, 1, 2]
-    flag_meanings: "unknown surface dive climb"
+  state:
+    dtype: i1
+    CF:
+      long_name: Glider State
+      comment: "Glider state: -1=unknown, 0=surface, 1=dive, 2=climb"
+      flag_values: [-1, 0, 1, 2]
+      flag_meanings: "unknown surface dive climb"
 
---- ### OPTIONAL SUITE: flight (measured)
+# =============================================================================
+# NGDAC STRUCTURAL CONFIG (always included)
+# =============================================================================
 
-heading:
-  source: m_heading
-  conversion: rad_to_deg
-  interpolate_missing: True
-  dtype: f4
-  CF:
-    long_name: Heading
-    standard_name: platform_orientation
-    units: degrees
-    observation_type: measured
-    valid_max: 360.0
-    valid_min: 0.0
+ngdac:
 
-battpos:
-  source: m_battpos
-  interpolate_missing: true
-  dtype: f4
-  CF:
-    long_name: Battery position
-    units: inches
+  crs:
+    CF:
+      epsg_code: EPSG:4326
+      grid_mapping_name: latitude_longitude
+      inverse_flattening: 298.257223563
+      long_name: http://www.opengis.net/def/crs/EPSG/0/4326
+      semi_major_axis: 6378137.0
 
-fin:
-  source: m_fin
-  conversion: rad_to_deg
-  dtype: f4
-  CF:
-    long_name: Fin angle
-    units: degrees
+  profile_time:
+    CF:
+      axis: T
+      calendar: gregorian
+      comment: Timestamp corresponding to the mid-point of the profile
+      long_name: Profile Center Time
+      observation_type: calculated
+      platform: platform
+      standard_name: time
+      units: seconds since 1970-01-01T00:00:00Z
 
-ballast_pumped:
-  source: m_de_oil_vol
-  dtype: f4
-  CF:
-    long_name: Ballast pumped
-    units: cm^3
-    observation_type: measured
+  profile_lat:
+    CF:
+      axis: Y
+      comment: Value is interpolated to provide an estimate of the latitude at the mid-point of the profile
+      long_name: Profile Center Latitude
+      observation_type: calculated
+      platform: platform
+      standard_name: latitude
+      units: degrees_north
+      valid_max: 90.0
+      valid_min: -90.0
 
---- ### OPTIONAL SUITE: thermo (derived)
+  profile_lon:
+    CF:
+      axis: X
+      comment: Value is interpolated to provide an estimate of the longitude at the mid-point of the profile
+      long_name: Profile Center Longitude
+      observation_type: calculated
+      platform: platform
+      standard_name: longitude
+      units: degrees_east
+      valid_max: 180.0
+      valid_min: -180.0
 
-# Tier 1 — derived from measured CTD variables
+  platform:
+    CF:
+      ancillary_variables: " "
+      comment: Autonomous vehicle
+      long_name: platform
+      type: platform
 
-salinity:
-  derived_from: [conductivity, temperature, pressure]
-  track_qc: True
-  dtype: f4
-  CF:
-    instrument: instrument_ctd
-    long_name: Salinity
-    observation_type: calculated
-    platform: platform
-    standard_name: sea_water_practical_salinity
-    units: "1"
-    valid_max: 40.0
-    valid_min: 0.0
+# =============================================================================
+# OPTIONAL SUITES — toggled via include: in config.yml
+# =============================================================================
 
-# Tier 2 — derived from Tier 1
+suites:
 
-SA:
-  derived_from: [salinity, pressure, lon, lat]
-  track_qc: True
-  dtype: f4
-  CF:
-    instrument: instrument_ctd
-    long_name: Absolute salinity
-    observation_type: calculated
-    platform: platform
-    standard_name: sea_water_absolute_salinity
-    units: g kg-1
-    valid_max: 40.0
-    valid_min: 0.0
+  # ---------------------------------------------------------------------------
+  flight:  # measured flight attitude and control variables
+  # ---------------------------------------------------------------------------
 
-z:
-  derived_from: [pressure, lat]
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Height
-    standard_name: height
-    units: m
-    valid_min: -2000.0
-    valid_max: 0.0
-    positive: up
-    reference_datum: sea-surface
-    instrument: instrument_ctd
-    observation_type: calculated
+    heading:
+      source: m_heading
+      conversion: rad_to_deg
+      interpolate_missing: True
+      dtype: f4
+      CF:
+        long_name: Heading
+        standard_name: platform_orientation
+        units: degrees
+        observation_type: measured
+        valid_max: 360.0
+        valid_min: 0.0
 
-# Tier 3 — derived from Tier 2
+    battpos:
+      source: m_battpos
+      interpolate_missing: true
+      dtype: f4
+      CF:
+        long_name: Battery position
+        units: inches
 
-CT:
-  derived_from: [SA, temperature, pressure]
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Conservative temperature
-    standard_name: sea_water_conservative_temperature
-    units: celsius
-    instrument: instrument_ctd
-    valid_min: -5.0
-    valid_max: 50.0
-    observation_type: calculated
+    fin:
+      source: m_fin
+      conversion: rad_to_deg
+      dtype: f4
+      CF:
+        long_name: Fin angle
+        units: degrees
 
-density:
-  derived_from: [SA, temperature, pressure]
-  track_qc: True
-  dtype: f4
-  CF:
-    instrument: instrument_ctd
-    long_name: Density
-    observation_type: calculated
-    platform: platform
-    standard_name: sea_water_density
-    units: kg m-3
-    valid_max: 1040.0
-    valid_min: 1015.0
+    ballast_pumped:
+      source: m_de_oil_vol
+      dtype: f4
+      CF:
+        long_name: Ballast pumped
+        units: cm^3
+        observation_type: measured
 
-rho0:
-  derived_from: [SA, temperature, pressure]
-  track_qc: True
-  dtype: f4
-  CF:
-    instrument: instrument_ctd
-    long_name: Potential density
-    observation_type: calculated
-    platform: platform
-    reference_pressure: 0
-    standard_name: sea_water_potential_density
-    units: kg m-3
-    valid_max: 1040.0
-    valid_min: 1015.0
+  # ---------------------------------------------------------------------------
+  thermo:  # derived thermodynamic variables (requires CTD)
+  # ---------------------------------------------------------------------------
 
-depth:
-  derived_from: [z]
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Depth
-    standard_name: depth
-    units: m
-    valid_min: 0.0
-    valid_max: 2000.0
-    positive: down
-    reference_datum: sea-surface
-    instrument: instrument_ctd
-    observation_type: calculated
+    salinity:
+      derived_from: [conductivity, temperature, pressure]
+      track_qc: True
+      dtype: f4
+      CF:
+        instrument: instrument_ctd
+        long_name: Salinity
+        observation_type: calculated
+        platform: platform
+        standard_name: sea_water_practical_salinity
+        units: "1"
+        valid_max: 40.0
+        valid_min: 0.0
 
-# Tier 4 — derived from Tier 3
+    SA:
+      derived_from: [salinity, pressure, lon, lat]
+      track_qc: True
+      dtype: f4
+      CF:
+        instrument: instrument_ctd
+        long_name: Absolute salinity
+        observation_type: calculated
+        platform: platform
+        standard_name: sea_water_absolute_salinity
+        units: g kg-1
+        valid_max: 40.0
+        valid_min: 0.0
 
-sound_speed:
-  derived_from: [SA, CT, pressure]
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Sound speed
-    standard_name: speed_of_sound_in_sea_water
-    units: m s-1
-    instrument: instrument_ctd
-    valid_min: 1400.0
-    valid_max: 1600.0
-    observation_type: calculated
+    z:
+      derived_from: [pressure, lat]
+      track_qc: True
+      dtype: f4
+      CF:
+        long_name: Height
+        standard_name: height
+        units: m
+        valid_min: -2000.0
+        valid_max: 0.0
+        positive: up
+        reference_datum: sea-surface
+        instrument: instrument_ctd
+        observation_type: calculated
 
-N2:
-  derived_from: [SA, CT, pressure, lat]
-  track_qc: True
-  dtype: f4
-  CF:
-    long_name: Buoyancy frequency squared
-    standard_name: square_of_brunt_vaisala_frequency_in_sea_water
-    units: s-2
-    observation_type: calculated
+    CT:
+      derived_from: [SA, temperature, pressure]
+      track_qc: True
+      dtype: f4
+      CF:
+        long_name: Conservative temperature
+        standard_name: sea_water_conservative_temperature
+        units: celsius
+        instrument: instrument_ctd
+        valid_min: -5.0
+        valid_max: 50.0
+        observation_type: calculated
 
---- ### NGDAC STRUCTURAL CONFIG
+    density:
+      derived_from: [SA, temperature, pressure]
+      track_qc: True
+      dtype: f4
+      CF:
+        instrument: instrument_ctd
+        long_name: Density
+        observation_type: calculated
+        platform: platform
+        standard_name: sea_water_density
+        units: kg m-3
+        valid_max: 1040.0
+        valid_min: 1015.0
 
-crs:
-  CF:
-    epsg_code: EPSG:4326
-    grid_mapping_name: latitude_longitude
-    inverse_flattening: 298.257223563
-    long_name: http://www.opengis.net/def/crs/EPSG/0/4326
-    semi_major_axis: 6378137.0
+    rho0:
+      derived_from: [SA, temperature, pressure]
+      track_qc: True
+      dtype: f4
+      CF:
+        instrument: instrument_ctd
+        long_name: Potential density
+        observation_type: calculated
+        platform: platform
+        reference_pressure: 0
+        standard_name: sea_water_potential_density
+        units: kg m-3
+        valid_max: 1040.0
+        valid_min: 1015.0
 
-profile_time:
-  CF:
-    axis: T
-    calendar: gregorian
-    comment: Timestamp corresponding to the mid-point of the profile
-    long_name: Profile Center Time
-    observation_type: calculated
-    platform: platform
-    standard_name: time
-    units: seconds since 1970-01-01T00:00:00Z
+    depth:
+      derived_from: [z]
+      track_qc: True
+      dtype: f4
+      CF:
+        long_name: Depth
+        standard_name: depth
+        units: m
+        valid_min: 0.0
+        valid_max: 2000.0
+        positive: down
+        reference_datum: sea-surface
+        instrument: instrument_ctd
+        observation_type: calculated
 
-profile_lat:
-  CF:
-    axis: Y
-    comment: Value is interpolated to provide an estimate of the latitude at the mid-point of the profile
-    long_name: Profile Center Latitude
-    observation_type: calculated
-    platform: platform
-    standard_name: latitude
-    units: degrees_north
-    valid_max: 90.0
-    valid_min: -90.0
+    sound_speed:
+      derived_from: [SA, CT, pressure]
+      track_qc: True
+      dtype: f4
+      CF:
+        long_name: Sound speed
+        standard_name: speed_of_sound_in_sea_water
+        units: m s-1
+        instrument: instrument_ctd
+        valid_min: 1400.0
+        valid_max: 1600.0
+        observation_type: calculated
 
-profile_lon:
-  CF:
-    axis: X
-    comment: Value is interpolated to provide an estimate of the longitude at the mid-point of the profile
-    long_name: Profile Center Longitude
-    observation_type: calculated
-    platform: platform
-    standard_name: longitude
-    units: degrees_east
-    valid_max: 180.0
-    valid_min: -180.0
+    N2:
+      derived_from: [SA, CT, pressure, lat]
+      track_qc: True
+      dtype: f4
+      CF:
+        long_name: Buoyancy frequency squared
+        standard_name: square_of_brunt_vaisala_frequency_in_sea_water
+        units: s-2
+        observation_type: calculated
 
-platform:
-  CF:
-    ancillary_variables: " "
-    comment: Autonomous vehicle
-    long_name: platform
-    type: platform
+  # ---------------------------------------------------------------------------
+  flight_model:  # output variables from the steady-state flight model
+  # ---------------------------------------------------------------------------
+
+    speed_through_water:
+      dtype: f4
+      CF:
+        long_name: Speed through water
+        units: m s-1
+        comment: Along-axis incident water speed from steady-state flight model
+        observation_type: calculated
+        valid_min: 0.0
+        valid_max: 2.0
+
+    vertical_glider_velocity:
+      dtype: f4
+      CF:
+        long_name: Vertical glider velocity
+        units: m s-1
+        comment: >-
+          Vertical component of glider velocity through the water (upward
+          positive). Negative when diving, positive when climbing.
+        observation_type: calculated
+        valid_min: -1.0
+        valid_max: 1.0
+
+    vertical_water_velocity:
+      dtype: f4
+      CF:
+        long_name: Vertical water velocity
+        units: m s-1
+        comment: >-
+          Vertical water velocity estimated as dz/dt minus modelled vertical
+          glider velocity (upward positive).
+        observation_type: calculated
+        valid_min: -1.0
+        valid_max: 1.0
+
+    angle_of_attack:
+      dtype: f4
+      CF:
+        long_name: Angle of attack
+        units: degrees
+        comment: Angle of attack of glider relative to oncoming flow
+        observation_type: calculated
+        valid_min: -30.0
+        valid_max: 30.0

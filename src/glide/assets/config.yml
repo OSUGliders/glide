@@ -168,3 +168,41 @@ merged_variables:
       valid_max: 0.001
       instrument: instrument_microrider
       observation_type: calculated
+
+
+# =============================================================================
+# FLIGHT MODEL
+# =============================================================================
+# Optional steady-state glider flight model parameters.  This section is only
+# used by the `glide flight` command and is ignored by all other commands.
+#
+# Parameters marked (*) are commonly calibrated per deployment.  All others
+# default to the values shown here if omitted.
+#
+# calibrate: list the parameter names to fit against the observed depth rate.
+#   Any subset of: Vg, mg, Cd0, ah, aw, Cd1
+#   Default: [Vg, mg, Cd0, ah]
+#
+# bounds: restrict which observations are used during calibration.
+#   min_pressure / max_pressure  — pressure range in dbar
+#   time_start / time_end        — ISO 8601 datetime strings or null (no bound)
+#
+# All model parameters (calibrated and fixed) are stored as global NetCDF
+# attributes prefixed with `flight_model_` in the output file.
+
+# flight:
+#   rho0: 1025.0        # reference density (kg m-3)
+#   mg: 70.0            # (*) glider mass (kg)
+#   Vg: 0.070           # (*) glider volume (m3)
+#   Cd0: 0.15           # (*) parasitic drag coefficient
+#   ah: 3.8             # (*) hull lift slope (rad-1)
+#   calibrate:
+#     - Vg
+#     - mg
+#     - Cd0
+#     - ah
+#   bounds:
+#     min_pressure: 20.0
+#     max_pressure: 200.0
+#     time_start: null
+#     time_end: null

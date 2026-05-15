@@ -21,6 +21,9 @@ from . import (
     process_l3,
     profiles,
 )
+from . import (
+    flight as flt,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -433,6 +436,48 @@ def concat(
     ds = ancillery.concat(files, concat_dim=concat_dim)
 
     ds.to_netcdf(out_file)
+
+
+@app.command()
+@log_args
+def flight(
+    l2_file: Annotated[str, typer.Argument(help="The L2 dataset.")],
+    out_file: _out_file_annotation = "slocum.flight.nc",
+    config_file: _config_annotation = None,
+    inplace: Annotated[
+        bool,
+        typer.Option(
+            "--inplace",
+            "-i",
+            help="Amend the L2 file in-place instead of writing a new file. "
+            "Cannot be combined with --out.",
+        ),
+    ] = False,
+) -> None:
+    """
+    Apply a steady-state glider flight model to L2 data.
+
+    By default the result is written to a new file (--out).  Pass --inplace
+    to overwrite the L2 file directly instead.
+    """
+    if inplace and out_file != "slocum.flight.nc":
+        raise typer.BadParameter("--inplace and --out are mutually exclusive.")
+
+    conf = config.load_config(config_file)
+
+    ds = process_l2.parse_l2(l2_file)
+
+    params = flt.calibrate(ds, conf)
+
+    out = flt.apply_model(ds, params)
+
+    if inplace:
+        target = l2_file
+    else:
+        target = out_file
+
+    out.to_netcdf(target)
+    _log.info("Flight model output written to %s", target)
 
 
 @app.command()
