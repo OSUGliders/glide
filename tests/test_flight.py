@@ -8,10 +8,6 @@ import xarray as xr
 import glide.flight as fl
 from glide.config import load_config
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def get_l2() -> xr.Dataset:
     path = str(resources.files("tests").joinpath("data/flight_test.l2.csv"))
@@ -36,11 +32,6 @@ def minimal_conf(overrides: dict | None = None) -> dict:
     if overrides:
         conf["flight"].update(overrides)
     return conf
-
-
-# ---------------------------------------------------------------------------
-# Unit tests for physics helpers
-# ---------------------------------------------------------------------------
 
 
 def test_aw_from_geometry():
@@ -89,11 +80,6 @@ def test_solve_aoa_zero_pitch():
     assert np.allclose(aoa, 0.0)
 
 
-# ---------------------------------------------------------------------------
-# calibrate
-# ---------------------------------------------------------------------------
-
-
 def test_calibrate_returns_all_params():
     ds = get_l2()
     conf = minimal_conf()
@@ -117,11 +103,6 @@ def test_calibrate_bounds_too_restrictive_raises():
     conf = minimal_conf({"bounds": {"min_pressure": 500.0, "max_pressure": 501.0}})
     with pytest.raises(ValueError, match="Fewer than 100 data points"):
         fl.calibrate(ds, conf)
-
-
-# ---------------------------------------------------------------------------
-# apply_model
-# ---------------------------------------------------------------------------
 
 
 def test_apply_model_adds_variables():
@@ -163,11 +144,6 @@ def test_apply_model_output_shape():
     out = fl.apply_model(ds, p)
     n = ds.time.size
     assert out["speed_through_water"].shape == (n,)
-
-
-# ---------------------------------------------------------------------------
-# End-to-end: calibrate then apply
-# ---------------------------------------------------------------------------
 
 
 def test_end_to_end():
