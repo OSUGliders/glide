@@ -1,20 +1,9 @@
-from importlib import resources
-
 import numpy as np
-import pandas as pd
 import pytest
 import xarray as xr
 
 import glide.flight as fl
 from glide.config import load_config
-
-
-def get_l2() -> xr.Dataset:
-    path = str(resources.files("tests").joinpath("data/flight_test.l2.csv"))
-    df = pd.read_csv(path)
-    # Restore datetime64 time from integer nanoseconds since epoch
-    df["time"] = pd.to_datetime(df["time"], unit="ns", utc=True)
-    return df.set_index("time").to_xarray()
 
 
 def minimal_conf(overrides: dict | None = None) -> dict:
@@ -27,7 +16,7 @@ def minimal_conf(overrides: dict | None = None) -> dict:
         "Cd0": 0.15,
         "ah": 3.8,
         "calibrate": ["Vg", "mg"],
-        "bounds": {"min_pressure": 20.0, "max_pressure": 200.0},
+        "bounds": {"min_pressure": 5.0, "max_pressure": 1000.0},
     }
     if overrides:
         conf["flight"].update(overrides)
@@ -80,8 +69,8 @@ def test_solve_aoa_zero_pitch():
     assert np.allclose(aoa, 0.0)
 
 
-def test_calibrate_returns_all_params():
-    ds = get_l2()
+def test_calibrate_returns_all_params(sl685_l2):
+    ds = sl685_l2
     conf = minimal_conf()
     params = fl.calibrate(ds, conf)
 
@@ -90,23 +79,23 @@ def test_calibrate_returns_all_params():
         assert key in params, f"Missing param '{key}' in calibrate output"
 
 
-def test_calibrate_params_are_finite():
-    ds = get_l2()
+def test_calibrate_params_are_finite(sl685_l2):
+    ds = sl685_l2
     conf = minimal_conf()
     params = fl.calibrate(ds, conf)
     for key in ["mg", "Vg", "Cd0", "ah"]:
         assert np.isfinite(params[key]), f"param '{key}' is not finite"
 
 
-def test_calibrate_bounds_too_restrictive_raises():
-    ds = get_l2()
-    conf = minimal_conf({"bounds": {"min_pressure": 500.0, "max_pressure": 501.0}})
+def test_calibrate_bounds_too_restrictive_raises(sl685_l2):
+    ds = sl685_l2
+    conf = minimal_conf({"bounds": {"min_pressure": 490.0, "max_pressure": 491.0}})
     with pytest.raises(ValueError, match="Fewer than 100 data points"):
         fl.calibrate(ds, conf)
 
 
-def test_apply_model_adds_variables():
-    ds = get_l2()
+def test_apply_model_adds_variables(sl685_l2):
+    ds = sl685_l2
     p = fl._build_params({})
     out = fl.apply_model(ds, p)
 
@@ -120,8 +109,8 @@ def test_apply_model_adds_variables():
         assert out[var].dims == ("time",)
 
 
-def test_apply_model_stores_global_attrs():
-    ds = get_l2()
+def test_apply_model_stores_global_attrs(sl685_l2):
+    ds = sl685_l2
     p = fl._build_params({})
     out = fl.apply_model(ds, p)
 
@@ -130,24 +119,24 @@ def test_apply_model_stores_global_attrs():
         assert attr in out.attrs, f"Global attribute '{attr}' missing"
 
 
-def test_apply_model_does_not_mutate_input():
-    ds = get_l2()
+def test_apply_model_does_not_mutate_input(sl685_l2):
+    ds = sl685_l2
     original_vars = set(ds.data_vars)
     p = fl._build_params({})
     _ = fl.apply_model(ds, p)
     assert set(ds.data_vars) == original_vars
 
 
-def test_apply_model_output_shape():
-    ds = get_l2()
+def test_apply_model_output_shape(sl685_l2):
+    ds = sl685_l2
     p = fl._build_params({})
     out = fl.apply_model(ds, p)
     n = ds.time.size
     assert out["speed_through_water"].shape == (n,)
 
 
-def test_end_to_end():
-    ds = get_l2()
+def test_end_to_end(sl685_l2):
+    ds = sl685_l2
     conf = minimal_conf()
     params = fl.calibrate(ds, conf)
     out = fl.apply_model(ds, params)
