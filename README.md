@@ -66,7 +66,7 @@ glide cfg -o my.config.yml
 A custom configuration may then be specified as an argument.
 
 ```
-glide l2 -o glidername.l2.nc -c  my.config.yml glidername.sbd.nc glidername.tbd.nc
+glide l2 -o glidername.l2.nc -c my.config.yml glidername.sbd.nc glidername.tbd.nc
 ```
 
 The two file arguments also accept shell-style glob patterns in quotes (`"..."`). `glide` will concatenate per-segment L1 files for you.
@@ -88,6 +88,12 @@ To extract dead-reckoned location data to CSV or just the surface fixes use the 
 ```
 glide gps glidername.l2.nc -o glidername.gps.csv  # dead-reckoned, interpolated position
 glide gps glidername.l2.nc -o glidername.fixes.csv --fixes  # surface GPS fixes only
+```
+
+A flight model may be calibrated against L2 glider data resulting in variables such as angle of attack and through-water speed. Review the configuration yml for more details on the setup. 
+
+```
+glider flight -c my.config.yml -o glidername.flight.nc glidername.l2.nc
 ```
 
 To view the help for the package, or a specific command, use:
