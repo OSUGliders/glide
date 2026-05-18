@@ -1,6 +1,6 @@
 [project]
 name = "slocum-glide"
-version = "0.1.2"
+version = "0.1.3"
 description = "Process Slocum glider data"
 readme = "README.md"
 authors = [
