@@ -3,7 +3,6 @@
 
 import glob
 import logging
-import re
 from pathlib import Path
 
 import gsw
@@ -16,16 +15,8 @@ from . import qc
 
 _log = logging.getLogger(__name__)
 
-_FLT_INFIXES = ("sbd", "dbd")
-_SCI_INFIXES = ("tbd", "ebd")
-_INPUT_EXTS = ("nc", "csv")
-_FILE_RE = re.compile(
-    r"^(?P<stem>.+)\.(?P<infix>"
-    + "|".join(_FLT_INFIXES + _SCI_INFIXES)
-    + r")\.(?P<ext>"
-    + "|".join(_INPUT_EXTS)
-    + r")$"
-)
+_FLT_MARKERS = ("sbd", "dbd")
+_SCI_MARKERS = ("tbd", "ebd")
 
 
 # Helper functions
@@ -106,21 +97,23 @@ def _format_variables(
 
 
 def _classify_file(path: str) -> tuple[str, str]:
-    """Return ('flt'|'sci', stem) for a recognized glider data file path.
+    """Return ('flt'|'sci', pairing_key) for a glider data file.
 
-    Raises ValueError if the basename does not match
-    `<stem>.(sbd|dbd|tbd|ebd).(nc|csv)`.
+    Flight files must contain 'dbd' (or 'sbd') somewhere in their name;
+    science files must contain 'ebd' (or 'tbd'). The pairing key is the
+    basename with 'dbd'/'sbd' replaced by 'ebd'/'tbd' so that a flight file
+    and its science counterpart share an identical key.
     """
     name = Path(path).name
-    match = _FILE_RE.match(name)
-    if match is None:
-        raise ValueError(
-            f"{path!r} does not look like a glider data file "
-            f"(expected <stem>.(sbd|dbd|tbd|ebd).(nc|csv))"
-        )
-    infix = match.group("infix")
-    kind = "flt" if infix in _FLT_INFIXES else "sci"
-    return kind, match.group("stem")
+    if any(m in name for m in _FLT_MARKERS):
+        key = name.replace("sbd", "ebd").replace("dbd", "ebd")
+        return "flt", key
+    if any(m in name for m in _SCI_MARKERS):
+        return "sci", name.replace("tbd", "ebd")
+    raise ValueError(
+        f"{path!r} does not look like a glider data file "
+        f"(name must contain one of: {_FLT_MARKERS + _SCI_MARKERS})"
+    )
 
 
 def pair_input_files(
@@ -128,14 +121,16 @@ def pair_input_files(
     sci_pattern: str,
     skip_unpaired: bool = False,
 ) -> list[tuple[str, str]]:
-    """Expand glob patterns and pair flight files to science files by stem.
+    """Expand glob patterns and pair flight files to science files by name.
 
     Each pattern may be a literal filename or a shell-style glob. Every flight
-    file in the expansion of `flt_pattern` must classify as flight
-    (.sbd/.dbd) and every science file must classify as science (.tbd/.ebd).
+    file in the expansion of `flt_pattern` must contain a flight marker
+    (dbd/sbd) and every science file must contain a science marker (ebd/tbd).
 
-    Pairing is by basename stem, e.g. `glider-2025-001.sbd.csv` pairs with
-    `glider-2025-001.tbd.csv`. Stems must match exactly.
+    Pairing is by normalised basename: the flight file's name with its marker
+    replaced by 'ebd' must equal the science file's name with its marker
+    replaced by 'ebd'. For example, `dbd.nc` pairs with `ebd.nc`, and
+    `glider-2025-001_dbd.nc` pairs with `glider-2025-001_ebd.nc`.
 
     By default, raises ValueError if any flight or science file is unpaired.
     With `skip_unpaired=True`, unpaired files are dropped and a warning is
@@ -153,49 +148,49 @@ def pair_input_files(
     if not sci_paths:
         raise ValueError(f"No science files matched pattern {sci_pattern!r}")
 
-    flt_by_stem: dict[str, str] = {}
+    flt_by_key: dict[str, str] = {}
     for p in flt_paths:
-        kind, stem = _classify_file(p)
+        kind, key = _classify_file(p)
         if kind != "flt":
             raise ValueError(
                 f"{p!r} matched the flight pattern but is not a flight file "
-                f"(expected .sbd or .dbd)"
+                f"(name must contain dbd or sbd)"
             )
-        if stem in flt_by_stem:
+        if key in flt_by_key:
             raise ValueError(
-                f"Duplicate flight stem {stem!r}: {flt_by_stem[stem]!r} and {p!r}"
+                f"Duplicate flight key {key!r}: {flt_by_key[key]!r} and {p!r}"
             )
-        flt_by_stem[stem] = p
+        flt_by_key[key] = p
 
-    sci_by_stem: dict[str, str] = {}
+    sci_by_key: dict[str, str] = {}
     for p in sci_paths:
-        kind, stem = _classify_file(p)
+        kind, key = _classify_file(p)
         if kind != "sci":
             raise ValueError(
                 f"{p!r} matched the science pattern but is not a science file "
-                f"(expected .tbd or .ebd)"
+                f"(name must contain ebd or tbd)"
             )
-        if stem in sci_by_stem:
+        if key in sci_by_key:
             raise ValueError(
-                f"Duplicate science stem {stem!r}: {sci_by_stem[stem]!r} and {p!r}"
+                f"Duplicate science key {key!r}: {sci_by_key[key]!r} and {p!r}"
             )
-        sci_by_stem[stem] = p
+        sci_by_key[key] = p
 
-    flt_only = sorted(set(flt_by_stem) - set(sci_by_stem))
-    sci_only = sorted(set(sci_by_stem) - set(flt_by_stem))
-    paired_stems = sorted(set(flt_by_stem) & set(sci_by_stem))
+    flt_only = sorted(set(flt_by_key) - set(sci_by_key))
+    sci_only = sorted(set(sci_by_key) - set(flt_by_key))
+    paired_keys = sorted(set(flt_by_key) & set(sci_by_key))
 
     if flt_only or sci_only:
         msg_parts = []
         if flt_only:
             msg_parts.append(
                 f"flight files without a science partner: "
-                f"{[flt_by_stem[s] for s in flt_only]}"
+                f"{[flt_by_key[k] for k in flt_only]}"
             )
         if sci_only:
             msg_parts.append(
                 f"science files without a flight partner: "
-                f"{[sci_by_stem[s] for s in sci_only]}"
+                f"{[sci_by_key[k] for k in sci_only]}"
             )
         msg = "Unpaired input files; " + "; ".join(msg_parts)
         if skip_unpaired:
@@ -203,13 +198,13 @@ def pair_input_files(
         else:
             raise ValueError(msg + ". Pass --skip-unpaired to drop them.")
 
-    if not paired_stems:
+    if not paired_keys:
         raise ValueError(
             "No flight/science file pairs found; "
-            "every flight file must have a science file with the same stem."
+            "every flight file must have a science file with a matching name."
         )
 
-    return [(flt_by_stem[s], sci_by_stem[s]) for s in paired_stems]
+    return [(flt_by_key[k], sci_by_key[k]) for k in paired_keys]
 
 
 # Public API functions
