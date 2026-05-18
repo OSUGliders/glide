@@ -316,6 +316,15 @@ def merge(
             _log.debug("Skipping %s; QC flags are re-initialized after merge", v)
             continue
 
+        if v in ds.data_vars:
+            _log.warning(
+                "Variable %s is present in both flight and science files; "
+                "keeping the %s version",
+                v,
+                times_from,
+            )
+            continue
+
         try:  # Only drop variables if the flag is explicitly set
             drop = config["variables"][v]["drop_from_l2"]
             if drop:
