@@ -38,9 +38,9 @@ def correct_ctd(sci: xr.Dataset, config: dict) -> xr.Dataset:
         )
         return sci
 
-    lag_s = float(((config.get("ctd") or {}).get("rbrctd") or {}).get(
-        "temperature_lag", 0.9
-    ))
+    lag_s = float(
+        ((config.get("ctd") or {}).get("rbrctd") or {}).get("temperature_lag", 0.9)
+    )
 
     t_native, T, C = _build_native_rbrctd(sci)
     if t_native.size < 2:
@@ -54,10 +54,16 @@ def correct_ctd(sci: xr.Dataset, config: dict) -> xr.Dataset:
     C_on_sci = np.interp(sci_t, t_native, C, left=np.nan, right=np.nan)
 
     sci = _overwrite(
-        sci, "temperature", T_on_sci, f"lag-corrected (lag={lag_s}s) via ctd.correct_ctd"
+        sci,
+        "temperature",
+        T_on_sci,
+        f"lag-corrected (lag={lag_s}s) via ctd.correct_ctd",
     )
     sci = _overwrite(
-        sci, "conductivity", C_on_sci, "interpolated from rbrctd native grid via ctd.correct_ctd"
+        sci,
+        "conductivity",
+        C_on_sci,
+        "interpolated from rbrctd native grid via ctd.correct_ctd",
     )
     return sci
 
