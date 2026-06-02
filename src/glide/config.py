@@ -19,6 +19,7 @@ _REQUIRED_CONFIG_SECTIONS = (
     "qc",
     "l1_variables",
     "merged_variables",
+    "ctd",
 )
 
 # Helper functions
@@ -202,6 +203,7 @@ def load_config(file: str | None = None) -> dict:
     l1_vars = _section("l1_variables")
     merged_vars = _section("merged_variables")
     flight_model_cfg = _section("flight")
+    ctd_cfg = _section("ctd")
 
     # Build variable set: core + enabled optional suites
     variables = _merge_suites(core, suites, include)
@@ -244,6 +246,7 @@ def load_config(file: str | None = None) -> dict:
         ngdac=ngdac,
         include=include,
         flight=flight_model_cfg,
+        ctd=ctd_cfg,
     )
 
     return config
