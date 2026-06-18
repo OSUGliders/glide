@@ -21,53 +21,6 @@ _RBRCTD_VARS = (
 _TS_SENTINEL = 946684800  # 2000-01-01T00:00:00Z
 
 
-def correct_ctd(sci: xr.Dataset, config: dict) -> xr.Dataset:
-    """Apply CTD lag correction to the science dataset.
-
-    For the RBR Concerto: shift temperature earlier in time on the native
-    ``rbrctd_time`` grid by ``ctd.rbrctd.temperature_lag`` seconds, then
-    interpolate the lag-shifted temperature and the unadjusted conductivity
-    back onto ``sci.time``, overwriting ``temperature`` and ``conductivity``.
-
-    Returns ``sci`` unchanged when the rbrctd variables are not present.
-    Other CTDs are not yet supported.
-    """
-    if not all(v in sci.variables for v in _RBRCTD_VARS):
-        _log.debug(
-            "rbrctd variables not present in science dataset; skipping CTD correction"
-        )
-        return sci
-
-    lag_s = float(
-        ((config.get("ctd") or {}).get("rbrctd") or {}).get("temperature_lag", 0.9)
-    )
-
-    t_native, T, C = _build_native_rbrctd(sci)
-    if t_native.size < 2:
-        _log.warning("rbrctd has fewer than 2 valid samples; skipping correction")
-        return sci
-
-    T_lag = _apply_lag(t_native, T, lag_s)
-
-    sci_t = _time_as_seconds(sci["time"])
-    T_on_sci = np.interp(sci_t, t_native, T_lag, left=np.nan, right=np.nan)
-    C_on_sci = np.interp(sci_t, t_native, C, left=np.nan, right=np.nan)
-
-    sci = _overwrite(
-        sci,
-        "temperature",
-        T_on_sci,
-        f"lag-corrected (lag={lag_s}s) via ctd.correct_ctd",
-    )
-    sci = _overwrite(
-        sci,
-        "conductivity",
-        C_on_sci,
-        "interpolated from rbrctd native grid via ctd.correct_ctd",
-    )
-    return sci
-
-
 def _build_native_rbrctd(
     sci: xr.Dataset,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -124,3 +77,50 @@ def _time_as_seconds(t: xr.DataArray) -> np.ndarray:
     if np.issubdtype(vals.dtype, np.datetime64):
         return vals.astype("datetime64[ns]").astype("f8") / 1e9
     return np.asarray(vals, dtype="f8")
+
+
+def correct_ctd(sci: xr.Dataset, config: dict) -> xr.Dataset:
+    """Apply CTD lag correction to the science dataset.
+
+    For the RBR Concerto: shift temperature earlier in time on the native
+    ``rbrctd_time`` grid by ``ctd.rbrctd.temperature_lag`` seconds, then
+    interpolate the lag-shifted temperature and the unadjusted conductivity
+    back onto ``sci.time``, overwriting ``temperature`` and ``conductivity``.
+
+    Returns ``sci`` unchanged when the rbrctd variables are not present.
+    Other CTDs are not yet supported.
+    """
+    if not all(v in sci.variables for v in _RBRCTD_VARS):
+        _log.debug(
+            "rbrctd variables not present in science dataset; skipping CTD correction"
+        )
+        return sci
+
+    lag_s = float(
+        ((config.get("ctd") or {}).get("rbrctd") or {}).get("temperature_lag", 0.9)
+    )
+
+    t_native, T, C = _build_native_rbrctd(sci)
+    if t_native.size < 2:
+        _log.warning("rbrctd has fewer than 2 valid samples; skipping correction")
+        return sci
+
+    T_lag = _apply_lag(t_native, T, lag_s)
+
+    sci_t = _time_as_seconds(sci["time"])
+    T_on_sci = np.interp(sci_t, t_native, T_lag, left=np.nan, right=np.nan)
+    C_on_sci = np.interp(sci_t, t_native, C, left=np.nan, right=np.nan)
+
+    sci = _overwrite(
+        sci,
+        "temperature",
+        T_on_sci,
+        f"lag-corrected (lag={lag_s}s) via ctd.correct_ctd",
+    )
+    sci = _overwrite(
+        sci,
+        "conductivity",
+        C_on_sci,
+        "interpolated from rbrctd native grid via ctd.correct_ctd",
+    )
+    return sci

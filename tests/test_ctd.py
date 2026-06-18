@@ -1,10 +1,14 @@
 """Tests for glide.ctd lag correction."""
 
+from importlib import resources
+
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
+from scipy.signal import coherence, csd
 
-from glide import ctd
+from glide import config, ctd, process_l1
 
 
 def _make_sci(t_native=None, T=None, C=None, sci_time=None):
@@ -151,3 +155,81 @@ def test_correct_ctd_too_few_samples_returns_unchanged():
     out = ctd.correct_ctd(sci, _cfg())
     xr.testing.assert_identical(out.temperature, sci_in.temperature)
     xr.testing.assert_identical(out.conductivity, sci_in.conductivity)
+
+
+# --- Spectral validation on real RBR legato data ---------------------------
+# tests/data/sl1267.ebd.csv holds ~1 h of a real RBR legato deployment
+# (2026-05-14 18:00–19:00 UTC, sampled at ~1 Hz). The lag correction aligns
+# temperature with conductivity in time, which should drive the C–T
+# cross-spectral phase to ~0 at high frequency.
+
+_FS = 1.0  # legato sample rate (Hz)
+
+
+def _longest_segment(t, *arrays, max_gap=5.0):
+    """Return the arrays sliced to the longest gap-free run of ``t`` (gap > max_gap)."""
+    brk = np.where(np.diff(t) > max_gap)[0]
+    bounds = np.concatenate([[0], brk + 1, [t.size]])
+    a, b = max(
+        ((bounds[i], bounds[i + 1]) for i in range(len(bounds) - 1)),
+        key=lambda s: s[1] - s[0],
+    )
+    return (t[a:b], *(x[a:b] for x in arrays))
+
+
+def _coherent_phase(C, T, fmin=0.05, coh_min=0.5):
+    """Mean |cross-spectral phase| of (C, T) over coherent bins above ``fmin``."""
+    f, Pxy = csd(C, T, fs=_FS, nperseg=128)
+    _, coh = coherence(C, T, fs=_FS, nperseg=128)
+    band = (f > fmin) & (coh > coh_min)
+    return np.mean(np.abs(np.angle(Pxy[band])))
+
+
+@pytest.fixture(scope="module")
+def rbr_native():
+    """(time, T, C) on the native rbrctd grid from the sl1267 fixture."""
+    ebd = str(resources.files("tests").joinpath("data/sl1267.ebd.csv"))
+    conf = config.load_config()
+    sci = process_l1.format_l1(process_l1.parse_l1(ebd), conf)
+    return ctd._build_native_rbrctd(sci)
+
+
+def test_fixture_has_rbrctd_variables(rbr_native):
+    t, T, C = rbr_native
+    assert t.size > 1000  # ~1 h at 1 Hz
+    assert np.all(np.isfinite(T)) and np.all(np.isfinite(C))
+
+
+def test_rbrctd_conductivity_formatted_to_canonical_units():
+    # ctd.correct_ctd overwrites the canonical `conductivity` (S/m) with the
+    # rbrctd values, so after formatting both must share CF units. The legato
+    # reports mS/cm, so a missing conversion shows up as a ~10x scale mismatch.
+    ebd = str(resources.files("tests").joinpath("data/sl1267.ebd.csv"))
+    conf = config.load_config()
+    sci = process_l1.format_l1(process_l1.parse_l1(ebd), conf)
+
+    assert (
+        sci["rbrctd_conductivity"].attrs["units"] == sci["conductivity"].attrs["units"]
+    )
+    ratio = np.nanmedian(sci["rbrctd_conductivity"].values) / np.nanmedian(
+        sci["conductivity"].values
+    )
+    assert 0.8 < ratio < 1.25  # same scale (S/m), not a 10x mS/cm mismatch
+
+
+def test_lag_removes_high_frequency_ct_phase(rbr_native):
+    # Resample the longest gap-free dive segment onto a uniform 1 Hz grid,
+    # then compare the C–T phase before and after the configured lag shift.
+    t, T, C = _longest_segment(*rbr_native)
+    lag = config.load_config()["ctd"]["rbrctd"]["temperature_lag"]
+
+    tu = np.arange(t[0], t[-1], 1.0 / _FS)
+    Ti = np.interp(tu, t, T)
+    Ci = np.interp(tu, t, C)
+    Tlag = ctd._apply_lag(tu, Ti, lag)
+
+    before = _coherent_phase(Ci, Ti)
+    after = _coherent_phase(Ci, Tlag)
+
+    assert after < 0.3  # ~0 rad in the coherent high-frequency band
+    assert after < 0.4 * before  # and a large reduction vs. uncorrected

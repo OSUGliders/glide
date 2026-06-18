@@ -568,11 +568,12 @@ suites:
 
     rbrctd_conductivity:
       source: sci_rbrctd_conductivity_00
+      conversion: mspcm_to_spm  # legato reports mS/cm; store in S/m like `conductivity`
       drop_from_l2: True
       CF:
         long_name: RBR CTD conductivity
         standard_name: sea_water_electrical_conductivity
-        units: mS cm-1
+        units: S m-1
         instrument: instrument_ctd
         observation_type: measured
         valid_min: 0.1
