@@ -21,6 +21,11 @@ def spm_to_mspcm(x: ArrayLike) -> NDArray:
     return 10 * np.asarray(x)
 
 
+def mspcm_to_spm(x: ArrayLike) -> NDArray:
+    """Convert conductivity in mS/cm to S/m."""
+    return 0.1 * np.asarray(x)
+
+
 def rad_to_deg(x: ArrayLike) -> NDArray:
     """Convert radians to degrees."""
     return np.rad2deg(x)

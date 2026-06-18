@@ -541,6 +541,45 @@ suites:
         observation_type: calculated
 
   # ---------------------------------------------------------------------------
+  ctd_corrections:  # CTD-native variables used by ctd.correct_ctd
+  # ---------------------------------------------------------------------------
+  # Used to correct for thermal mass and lag effects in temperature and salinity.
+
+    rbrctd_time:
+      source: sci_rbrctd_timestamp
+      drop_from_l2: True
+      CF:
+        long_name: RBR CTD native timestamp
+        standard_name: time
+        units: seconds since 1970-01-01T00:00:00Z
+        observation_type: measured
+
+    rbrctd_temperature:
+      source: sci_rbrctd_temperature_00
+      drop_from_l2: True
+      CF:
+        long_name: RBR CTD temperature
+        standard_name: sea_water_temperature
+        units: celsius
+        instrument: instrument_ctd
+        observation_type: measured
+        valid_min: -5.0
+        valid_max: 50.0
+
+    rbrctd_conductivity:
+      source: sci_rbrctd_conductivity_00
+      conversion: mspcm_to_spm  # legato reports mS/cm; store in S/m like `conductivity`
+      drop_from_l2: True
+      CF:
+        long_name: RBR CTD conductivity
+        standard_name: sea_water_electrical_conductivity
+        units: S m-1
+        instrument: instrument_ctd
+        observation_type: measured
+        valid_min: 0.1
+        valid_max: 10.0
+
+  # ---------------------------------------------------------------------------
   flight_model:  # output variables from the steady-state flight model
   # ---------------------------------------------------------------------------
 

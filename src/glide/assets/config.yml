@@ -48,8 +48,9 @@ netcdf_attributes:
 # variable in it from the L2 output.
 
 include:
-  flight: true   # fin, battpos, heading, ballast_pumped
-  thermo: true   # salinity, density, rho0, SA, CT, N2, depth, z, sound_speed
+  flight: true            # fin, battpos, heading, ballast_pumped
+  thermo: true            # salinity, density, rho0, SA, CT, N2, depth, z, sound_speed
+  ctd_corrections: true   # rbrctd_* and ctd41cp_* raw variables
 
 
 # =============================================================================
@@ -137,6 +138,19 @@ qc: {}
 #       observation_type: measured
 
 l1_variables: {}
+
+
+# =============================================================================
+# CTD CORRECTIONS
+# =============================================================================
+# Sensor-specific lag corrections applied to the CTD temperature before the
+# science dataset is merged with flight. Requires
+# `include: ctd_corrections: true` so the sensor-native source variables are
+# pulled out of the raw science file. 
+
+ctd:
+  rbrctd:
+    temperature_lag: 0.9   # seconds; positive means sensor lags water
 
 
 # =============================================================================
