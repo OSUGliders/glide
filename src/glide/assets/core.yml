@@ -545,6 +545,22 @@ suites:
   # ---------------------------------------------------------------------------
   # Used to correct for thermal mass and lag effects in temperature and salinity.
 
+    temperature_cell:
+      derived_from: [rbrctd_time, rbrctd_temperature, pressure, pitch]
+      dtype: f4
+      CF:
+        long_name: Conductivity cell temperature
+        standard_name: sea_water_temperature
+        units: celsius
+        instrument: instrument_ctd
+        observation_type: calculated
+        valid_min: -5.0
+        valid_max: 50.0
+        comment: >-
+          Temperature corrected for sensor lag and thermal mass, estimating the
+          temperature of the water in the conductivity cell. Salinity is
+          calculated from this rather than from the reported temperature.
+
     rbrctd_time:
       source: sci_rbrctd_timestamp
       drop_from_l2: True

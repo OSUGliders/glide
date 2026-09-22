@@ -228,7 +228,7 @@ def l2(
     flt = process_l1.apply_qc(flt, conf)
     sci = process_l1.apply_qc(sci, conf)
 
-    sci = ctd.correct_ctd(sci, conf)
+    sci = ctd.correct_ctd(sci, conf, flt=flt)
 
     merged = process_l1.merge(flt, sci, conf, "science")
 

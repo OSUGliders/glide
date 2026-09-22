@@ -129,6 +129,7 @@ During L1 to L2 processing we:
 * Interpolate missing dead-reckoned position and linearly adjust the dead-reckoned position to align with surface fixes.
 * Identify behavioral states such as dive, climb, surface, and drift, and assign profile numbers. This relies on [profinder](github.com/oceancascades/profinder)
 * Track per-variable QC flags (`*_qc`) for variables tagged `track_qc` in core.yml, including for variables interpolated across the science/flight merge.
+* Correct the RBR legato temperature for sensor lag and thermal mass. The reported `temperature` is lag corrected; salinity is calculated from `temperature_cell`, which is additionally corrected for the thermal mass of the sensor. Parameters are in the `ctd:` section of `config.yml`.
 
 We plan to implement more of the [standard IOOS QC methods](https://cdn.ioos.noaa.gov/media/2017/12/Manual-for-QC-of-Glider-Data_05_09_16.pdf) in the future.
 

@@ -377,9 +377,10 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     variable_specs = config["variables"]
 
     # These variables derive their initial qc from the conductivity_qc.
-    salinity = gsw.SP_from_C(
-        conv.spm_to_mspcm(ds.conductivity), ds.temperature, ds.pressure
-    )
+    # `temperature_cell` is the thermal mass corrected temperature of the water
+    # in the conductivity cell, added by ctd.correct_ctd when it can be derived.
+    t_cell = ds.temperature_cell if "temperature_cell" in ds else ds.temperature
+    salinity = gsw.SP_from_C(conv.spm_to_mspcm(ds.conductivity), t_cell, ds.pressure)
     ds["salinity"] = (dims, salinity.values, variable_specs["salinity"]["CF"])
 
     lon = ds.lon.interpolate_na("time")

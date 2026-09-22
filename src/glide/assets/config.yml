@@ -143,14 +143,44 @@ l1_variables: {}
 # =============================================================================
 # CTD CORRECTIONS
 # =============================================================================
-# Sensor-specific lag corrections applied to the CTD temperature before the
-# science dataset is merged with flight. Requires
+# Sensor-specific lag and thermal mass corrections applied to the CTD
+# temperature before the science dataset is merged with flight. Requires
 # `include: ctd_corrections: true` so the sensor-native source variables are
-# pulled out of the raw science file. 
+# pulled out of the raw science file.
+#
+# The reported `temperature` is lag corrected only. Salinity is calculated from
+# `temperature_cell`, which is additionally corrected for the thermal mass of
+# the sensor. The thermal mass correction needs an estimate of glider speed,
+# which is derived from the vertical velocity, the pitch and the angle of
+# attack, so it is skipped when no flight data is available.
+#
+# Every value below is optional; the defaults shown are applied when a key is
+# omitted. They are the manufacturer specified values for the RBR legato.
 
 ctd:
   rbrctd:
-    temperature_lag: 0.9   # seconds; positive means sensor lags water
+    temperature_lag: 0.9    # seconds; positive means sensor lags water
+    angle_of_attack: 3.0    # degrees, added to |pitch| when estimating speed
+    # alpha = alpha_prefactor * (100 * U)^alpha_exponent  (fractional amplitude error)
+    # tau   = tau_prefactor   * (100 * U)^tau_exponent    (response time, seconds)
+    # U is glider speed in m s-1; the factor of 100 converts it to the cm s-1
+    # that the RBR coefficients are defined for.
+    thermal_mass:
+      bulk:   # thermistor housing
+        alpha_prefactor: 0.05
+        alpha_exponent: -0.83
+        tau_prefactor: 334.21
+        tau_exponent: 0.03
+      long:   # slow heat exchange with the sensor body
+        alpha_prefactor: 0.18
+        alpha_exponent: -1.1
+        tau_prefactor: 179.0
+        tau_exponent: 0.0
+      short:  # fast heat exchange with the sensor stem
+        alpha_prefactor: 0.23
+        alpha_exponent: -0.82
+        tau_prefactor: 27.15
+        tau_exponent: -0.58
 
 
 # =============================================================================
