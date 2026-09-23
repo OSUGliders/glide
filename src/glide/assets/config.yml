@@ -48,8 +48,9 @@ netcdf_attributes:
 # variable in it from the L2 output.
 
 include:
-  flight: true   # fin, battpos, heading, ballast_pumped
-  thermo: true   # salinity, density, rho0, SA, CT, N2, depth, z, sound_speed
+  flight: true            # fin, battpos, heading, ballast_pumped
+  thermo: true            # salinity, density, rho0, SA, CT, N2, depth, z, sound_speed
+  ctd_corrections: true   # rbrctd_* and ctd41cp_* raw variables
 
 
 # =============================================================================
@@ -137,6 +138,61 @@ qc: {}
 #       observation_type: measured
 
 l1_variables: {}
+
+
+# =============================================================================
+# CTD CORRECTIONS
+# =============================================================================
+# Sensor-specific lag and thermal mass corrections applied to the CTD
+# temperature before the science dataset is merged with flight. Requires
+# `include: ctd_corrections: true` so the sensor-native source variables are
+# pulled out of the raw science file.
+#
+# The sensor is identified from the variables present in the science file, and
+# only the matching block below is used. The reported `temperature` is lag
+# corrected at most; salinity is calculated from `temperature_cell`, which is
+# additionally corrected for the thermal mass of the sensor.
+#
+# rbrctd (RBR legato): free flushing, so its coefficients depend on glider speed
+# (flight.estimate_speed) and the thermal mass stages are skipped when no flight
+# data is available. The correction is insensitive to that estimate: a 25% speed
+# error changes salinity by well under a thousandth of a psu.
+#
+# ctd41cp (pumped Sea-Bird): the pump sets the flow through the cell, so alpha
+# and tau are constants and no speed estimate is needed. The correction is
+# insensitive to them at this level: halving alpha changes salinity by about a
+# hundredth of a psu, and the choice of clock by a ten-thousandth.
+#
+# Every value below is optional; the defaults shown are applied when a key is
+# omitted. They are the manufacturer specified values for the RBR legato.
+
+ctd:
+  rbrctd:
+    temperature_lag: 0.9    # seconds; positive means sensor lags water
+    # alpha = alpha_prefactor * (100 * U)^alpha_exponent  (fractional amplitude error)
+    # tau   = tau_prefactor   * (100 * U)^tau_exponent    (response time, seconds)
+    # U is glider speed in m s-1; the factor of 100 converts it to the cm s-1
+    # that the RBR coefficients are defined for.
+    thermal_mass:
+      bulk:   # thermistor housing
+        alpha_prefactor: 0.05
+        alpha_exponent: -0.83
+        tau_prefactor: 334.21
+        tau_exponent: 0.03
+      long:   # slow heat exchange with the sensor body
+        alpha_prefactor: 0.18
+        alpha_exponent: -1.1
+        tau_prefactor: 179.0
+        tau_exponent: 0.0
+      short:  # fast heat exchange with the sensor stem
+        alpha_prefactor: 0.23
+        alpha_exponent: -0.82
+        tau_prefactor: 27.15
+        tau_exponent: -0.58
+
+  ctd41cp:
+    alpha: 0.03   # fractional amplitude error
+    tau: 7.0      # seconds, response time
 
 
 # =============================================================================

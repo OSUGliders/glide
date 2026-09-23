@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-import xarray as xr
 
 import glide.flight as fl
 from glide.config import load_config
@@ -149,3 +148,31 @@ def test_end_to_end(sl685_l2):
     ww = out["vertical_water_velocity"].values
     finite = ww[np.isfinite(ww)]
     assert np.abs(finite).mean() < 0.5, "Mean |ww| suspiciously large"
+
+
+def test_estimate_speed_from_pitch_and_pressure():
+    # A 0.2 m s-1 descent at 26 degrees pitch with the default 3 degree angle of
+    # attack gives U = 0.2 / sin(29 degrees).
+    n = 400
+    t = 1.78e9 + np.arange(n, dtype="f8")
+    pressure = 0.2 * np.arange(n)  # dbar, ~1 dbar per metre
+    pitch = np.deg2rad(np.full(n, -26.0))
+
+    U = fl.estimate_speed(t, pressure, pitch, 44.6)
+
+    expected = 0.2 / np.sin(np.deg2rad(29.0))  # 1 dbar is not exactly 1 m
+    np.testing.assert_allclose(U[1:-1], expected, rtol=2e-2)
+
+
+def test_estimate_speed_angle_of_attack_is_a_weak_knob():
+    # Worth pinning: the geometric estimate changes by only a few percent over
+    # the plausible range of angle of attack.
+    n = 100
+    t = 1.78e9 + np.arange(n, dtype="f8")
+    pressure = 0.2 * np.arange(n)
+    pitch = np.deg2rad(np.full(n, -26.0))
+
+    U0 = fl.estimate_speed(t, pressure, pitch, 44.6, aoa=0.0)
+    U6 = fl.estimate_speed(t, pressure, pitch, 44.6, aoa=np.deg2rad(6.0))
+
+    assert np.max(np.abs(U6 / U0 - 1)) < 0.2

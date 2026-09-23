@@ -95,6 +95,7 @@ def test_load_config_exclude_thermo():
         qc: {}
         l1_variables: {}
         merged_variables: {}
+        ctd: {}
     """)
     try:
         conf = config.load_config(path)
@@ -123,6 +124,7 @@ def test_load_config_qc_override_applied():
             max_gap: 900
         l1_variables: {}
         merged_variables: {}
+        ctd: {}
     """)
     try:
         conf = config.load_config(path)
@@ -154,6 +156,7 @@ def test_load_config_companion_variable():
               long_name: GPS horizontal dilution of precision
               units: "1"
         merged_variables: {}
+        ctd: {}
     """)
     try:
         conf = config.load_config(path)

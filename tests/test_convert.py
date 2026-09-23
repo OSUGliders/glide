@@ -18,6 +18,12 @@ def test_spm_to_mspcm() -> None:
     assert np.isclose(conv.spm_to_mspcm(C), 30)
 
 
+def test_mspcm_to_spm() -> None:
+    C = 30
+    assert np.isclose(conv.mspcm_to_spm(C), 3)
+    assert np.isclose(conv.mspcm_to_spm(conv.spm_to_mspcm(3.5)), 3.5)
+
+
 def test_mid() -> None:
     x = [1, 2, 4, 11]
     assert np.isclose(conv.mid(x), [1.5, 3, 7.5]).all()
