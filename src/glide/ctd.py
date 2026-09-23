@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import logging
 
-import gsw
 import numpy as np
 import pandas as pd
 import xarray as xr
 
+from . import flight
 from .config import _deep_merge
 
 _log = logging.getLogger(__name__)
@@ -31,7 +31,6 @@ _TS_SENTINEL = 946684800  # 2000-01-01T00:00:00Z
 # `ctd: rbrctd:` section of the user config.
 DEFAULTS = dict(
     temperature_lag=0.9,  # s, manufacturer specified
-    angle_of_attack=3.0,  # degrees, added to |pitch| when estimating speed
     thermal_mass=dict(
         bulk=dict(
             alpha_prefactor=0.05,
@@ -151,21 +150,13 @@ def _interp_finite(x: np.ndarray, y: np.ndarray, xi: np.ndarray) -> np.ndarray |
     return np.interp(xi, x[ok], y[ok])
 
 
-def _estimate_speed(
-    time_s: np.ndarray,
-    pressure: np.ndarray,
-    pitch: np.ndarray,
-    aoa: float,
-    lat: float,
-) -> np.ndarray:
-    """Through-water speed (m s-1) from vertical velocity and pitch geometry.
+def _bound_speed(U: np.ndarray) -> np.ndarray:
+    """Clip, smooth and gap-fill a speed estimate for the thermal mass filter.
 
-    ``pitch`` and ``aoa`` are in radians. The speed is clipped and smoothed
-    because the thermal mass coefficients are ill-behaved near the profile
-    apex, where the vertical velocity passes through zero.
+    The filter coefficients are ill-behaved near a profile apex, where the speed
+    estimate passes through zero, and a single non-finite speed would poison the
+    recursion for every later sample.
     """
-    w = np.gradient(gsw.z_from_p(pressure, lat), time_s)
-    U = np.abs(w) / np.sin(np.abs(pitch) + aoa)
     U = (
         pd.Series(np.clip(U, _U_MIN, _U_MAX))
         .rolling(_U_WINDOW, center=True, min_periods=_U_WINDOW // 2)
@@ -176,7 +167,7 @@ def _estimate_speed(
 
 
 def _native_speed(
-    sci: xr.Dataset, flt: xr.Dataset | None, t_native: np.ndarray, aoa_deg: float
+    sci: xr.Dataset, flt: xr.Dataset | None, t_native: np.ndarray
 ) -> np.ndarray | None:
     """Glider speed on the native CTD grid, or None if it cannot be estimated."""
     if flt is None or "pitch" not in flt.variables or "pressure" not in sci.variables:
@@ -198,13 +189,13 @@ def _native_speed(
         return None
 
     lat = np.nanmedian(flt["lat"].values) if "lat" in flt.variables else np.nan
-    return _estimate_speed(
+    U = flight.estimate_speed(
         t_native,
         pressure,
         np.deg2rad(pitch),
-        np.deg2rad(aoa_deg),
         float(lat) if np.isfinite(lat) else 0.0,
     )
+    return _bound_speed(U)
 
 
 def _overwrite(
@@ -241,8 +232,8 @@ def correct_ctd(
     The lag-shifted temperature is further corrected for the thermal mass of
     the sensor and added as ``temperature_cell``, which is what
     ``process_l1.calculate_thermodynamics`` calculates salinity from. The
-    thermal mass correction depends on glider speed, so it is skipped if no
-    flight data is provided.
+    thermal mass correction depends on an estimate of glider speed, so it is
+    skipped if no flight data is provided.
 
     Parameters
     ----------
@@ -292,7 +283,7 @@ def correct_ctd(
         "interpolated from rbrctd native grid via ctd.correct_ctd",
     )
 
-    U = _native_speed(sci, flt, t_native, float(cfg["angle_of_attack"]))
+    U = _native_speed(sci, flt, t_native)
     if U is None:
         return sci
 

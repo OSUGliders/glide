@@ -150,9 +150,10 @@ l1_variables: {}
 #
 # The reported `temperature` is lag corrected only. Salinity is calculated from
 # `temperature_cell`, which is additionally corrected for the thermal mass of
-# the sensor. The thermal mass correction needs an estimate of glider speed,
-# which is derived from the vertical velocity, the pitch and the angle of
-# attack, so it is skipped when no flight data is available.
+# the sensor. The thermal mass correction needs an estimate of glider speed
+# (flight.estimate_speed), so it is skipped when no flight data is available.
+# The correction is insensitive to that estimate: a 25% speed error changes
+# salinity by well under a thousandth of a psu.
 #
 # Every value below is optional; the defaults shown are applied when a key is
 # omitted. They are the manufacturer specified values for the RBR legato.
@@ -160,7 +161,6 @@ l1_variables: {}
 ctd:
   rbrctd:
     temperature_lag: 0.9    # seconds; positive means sensor lags water
-    angle_of_attack: 3.0    # degrees, added to |pitch| when estimating speed
     # alpha = alpha_prefactor * (100 * U)^alpha_exponent  (fractional amplitude error)
     # tau   = tau_prefactor   * (100 * U)^tau_exponent    (response time, seconds)
     # U is glider speed in m s-1; the factor of 100 converts it to the cm s-1

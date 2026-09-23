@@ -343,27 +343,15 @@ def test_correct_thermal_mass_composes_the_three_stages():
     )
 
 
-def test_estimate_speed_from_pitch_and_pressure():
-    # A 0.2 m s-1 descent at 26 degrees pitch with a 3 degree angle of attack
-    # gives U = 0.2 / sin(29 degrees).
-    n = 400
-    t = 1.78e9 + np.arange(n, dtype="f8")
-    pressure = 0.2 * np.arange(n)  # dbar, ~1 dbar per metre
-    pitch = np.deg2rad(np.full(n, -26.0))
-    U = ctd._estimate_speed(t, pressure, pitch, np.deg2rad(3.0), 44.6)
+def test_bound_speed_clips_smooths_and_fills():
+    U = np.concatenate(
+        [np.full(60, 0.35), [np.nan, np.inf, 0.0, 10.0], np.full(60, 0.35)]
+    )
+    out = ctd._bound_speed(U)
 
-    expected = 0.2 / np.sin(np.deg2rad(29.0))  # 1 dbar is not exactly 1 m
-    np.testing.assert_allclose(U[50:-50], expected, rtol=2e-2)
-
-
-def test_estimate_speed_is_bounded():
-    n = 200
-    t = 1.78e9 + np.arange(n, dtype="f8")
-    pressure = np.zeros(n)  # no vertical motion at all, U would be zero
-    pitch = np.deg2rad(np.full(n, -26.0))
-    U = ctd._estimate_speed(t, pressure, pitch, np.deg2rad(3.0), 44.6)
-    assert np.all(U >= ctd._U_MIN) and np.all(U <= ctd._U_MAX)
-    assert np.all(np.isfinite(U))
+    assert np.all(np.isfinite(out))
+    assert np.all(out >= ctd._U_MIN) and np.all(out <= ctd._U_MAX)
+    np.testing.assert_allclose(out[:40], 0.35, atol=1e-12)  # away from the spikes
 
 
 def test_correct_ctd_adds_temperature_cell_with_flight_data():
@@ -416,14 +404,13 @@ def test_shipped_config_matches_module_defaults():
     # documented parameters are not the ones applied when a key is omitted.
     shipped = config.load_config()["ctd"]["rbrctd"]
     assert shipped["temperature_lag"] == ctd.DEFAULTS["temperature_lag"]
-    assert shipped["angle_of_attack"] == ctd.DEFAULTS["angle_of_attack"]
     assert shipped["thermal_mass"] == ctd.DEFAULTS["thermal_mass"]
 
 
 def test_speed_on_real_data_is_plausible():
     flt, sci, _ = _sl1267()
     t, _, _ = ctd._build_native_rbrctd(sci)
-    U = ctd._native_speed(sci, flt, t, ctd.DEFAULTS["angle_of_attack"])
+    U = ctd._native_speed(sci, flt, t)
 
     assert np.all(np.isfinite(U))
     assert 0.2 < np.median(U) < 0.5  # a Slocum flies at a few tenths of m s-1
