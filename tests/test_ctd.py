@@ -53,6 +53,9 @@ def _cfg(lag=0.9):
     return {"ctd": {"rbrctd": {"temperature_lag": lag}}}
 
 
+_TM = ctd.DEFAULTS["rbrctd"]["thermal_mass"]
+
+
 def test_correct_ctd_no_rbrctd_returns_unchanged():
     sci = _make_sci().drop_vars(
         ["rbrctd_time", "rbrctd_temperature", "rbrctd_conductivity"]
@@ -268,7 +271,7 @@ def test_filter_coefficients_use_speed_in_cm_per_second():
     # The RBR power laws are defined for speed in cm s-1 while glide works in
     # m s-1; dropping the factor of 100 would silently rescale every
     # correction. Pin the coefficients to the cm s-1 convention at U = 0.3 m/s.
-    coeffs = ctd.DEFAULTS["thermal_mass"]["bulk"]
+    coeffs = _TM["bulk"]
     alpha = coeffs["alpha_prefactor"] * 30.0 ** coeffs["alpha_exponent"]
     tau = coeffs["tau_prefactor"] * 30.0 ** coeffs["tau_exponent"]
     expected_a = 4 * ctd._F_N * alpha * tau / (1 + 4 * ctd._F_N * tau)
@@ -281,7 +284,7 @@ def test_filter_coefficients_use_speed_in_cm_per_second():
 
 def test_filter_is_stable_across_the_speed_range():
     U = np.linspace(ctd._U_MIN, ctd._U_MAX, 50)
-    for coeffs in ctd.DEFAULTS["thermal_mass"].values():
+    for coeffs in _TM.values():
         _, b = ctd._filter_coefficients(U, coeffs)
         assert np.all(np.abs(b) < 1.0)
 
@@ -291,7 +294,7 @@ def test_thermal_mass_zero_for_constant_temperature():
     t = 1.78e9 + np.arange(n, dtype="f8")
     T = np.full(n, 12.0)
     U = np.full(n, 0.3)
-    out = ctd._thermal_mass(T, U, t, ctd.DEFAULTS["thermal_mass"]["bulk"])
+    out = ctd._thermal_mass(T, U, t, _TM["bulk"])
     np.testing.assert_allclose(out, 0.0, atol=1e-15)
 
 
@@ -302,7 +305,7 @@ def test_thermal_mass_responds_to_a_step():
     t = 1.78e9 + np.arange(n, dtype="f8")
     T = np.where(np.arange(n) < 100, 10.0, 11.0)
     U = np.full(n, 0.3)
-    coeffs = ctd.DEFAULTS["thermal_mass"]["short"]
+    coeffs = _TM["short"]
     out = ctd._thermal_mass(T, U, t, coeffs)
 
     alpha = coeffs["alpha_prefactor"] * 30.0 ** coeffs["alpha_exponent"]
@@ -317,7 +320,7 @@ def test_thermal_mass_resets_across_gaps():
     t[20:] += 10 * ctd._GAP  # a gap far longer than the reset threshold
     T = 10.0 + 0.1 * np.arange(n)
     U = np.full(n, 0.3)
-    out = ctd._thermal_mass(T, U, t, ctd.DEFAULTS["thermal_mass"]["bulk"])
+    out = ctd._thermal_mass(T, U, t, _TM["bulk"])
     assert out[20] == 0.0
     assert out[19] != 0.0
 
@@ -329,7 +332,7 @@ def test_correct_thermal_mass_composes_the_three_stages():
     t = 1.78e9 + np.arange(n, dtype="f8")
     T = 10.0 + np.sin(np.arange(n) / 20.0)
     U = np.full(n, 0.35)
-    tm = ctd.DEFAULTS["thermal_mass"]
+    tm = _TM
 
     T_bulk = T + ctd._thermal_mass(T, U, t, tm["bulk"])
     expected = (
@@ -373,9 +376,7 @@ def test_correct_ctd_without_flight_data_skips_thermal_mass():
 def test_correct_ctd_uses_configured_thermal_mass_parameters():
     sci = _make_sci()
     flt = _make_flt(sci)
-    zeroed = {
-        stage: dict(alpha_prefactor=0.0) for stage in ctd.DEFAULTS["thermal_mass"]
-    }
+    zeroed = {stage: dict(alpha_prefactor=0.0) for stage in _TM}
     conf = {"ctd": {"rbrctd": {"thermal_mass": zeroed}}}
 
     out = ctd.correct_ctd(sci, conf, flt=flt)
@@ -402,9 +403,13 @@ def test_partial_config_override_keeps_remaining_defaults():
 def test_shipped_config_matches_module_defaults():
     # config.yml documents the defaults; a drift between the two would mean the
     # documented parameters are not the ones applied when a key is omitted.
-    shipped = config.load_config()["ctd"]["rbrctd"]
-    assert shipped["temperature_lag"] == ctd.DEFAULTS["temperature_lag"]
-    assert shipped["thermal_mass"] == ctd.DEFAULTS["thermal_mass"]
+    shipped = config.load_config()["ctd"]
+    assert (
+        shipped["rbrctd"]["temperature_lag"]
+        == ctd.DEFAULTS["rbrctd"]["temperature_lag"]
+    )
+    assert shipped["rbrctd"]["thermal_mass"] == _TM
+    assert shipped["ctd41cp"] == ctd.DEFAULTS["ctd41cp"]
 
 
 def test_speed_on_real_data_is_plausible():
@@ -444,3 +449,160 @@ def test_salinity_is_calculated_from_temperature_cell():
     np.testing.assert_allclose(
         merged.salinity.values, expected.values, atol=1e-6, equal_nan=True
     )
+
+
+# --- Sea-Bird (pumped ctd41cp) ---------------------------------------------
+
+
+def _make_sbe_sci(n=200, dt=1.0):
+    """Science dataset as a pumped Sea-Bird glider produces it: no rbrctd suite,
+    a ctd41cp_time variable, and the CTD data on the canonical variables."""
+    t = 1.78e9 + np.arange(n) * dt
+    T = 12.0 - 4.0 / (1 + np.exp(-(np.arange(n) - n / 2) / 5.0))  # thermocline
+    return xr.Dataset(
+        data_vars=dict(
+            ctd41cp_time=("time", t - 0.5),
+            temperature=("time", T),
+            conductivity=("time", np.full(n, 3.4)),
+            pressure=("time", 0.2 * np.arange(n)),
+        ),
+        coords=dict(time=("time", pd.to_datetime(t, unit="s"))),
+    )
+
+
+def _sbe_cfg(alpha=0.03, tau=7.0):
+    return {"ctd": {"ctd41cp": {"alpha": alpha, "tau": tau}}}
+
+
+def test_ctd41cp_selected_by_its_timestamp_variable():
+    out = ctd.correct_ctd(_make_sbe_sci(), _sbe_cfg())
+    assert "temperature_cell" in out
+
+
+def test_no_ctd41cp_variable_means_no_correction():
+    sci = _make_sbe_sci().drop_vars("ctd41cp_time")
+    out = ctd.correct_ctd(sci, _sbe_cfg())
+    assert "temperature_cell" not in out
+
+
+def test_rbrctd_takes_precedence_over_ctd41cp():
+    # A dataset carrying both suites is a misconfiguration, but the legato path
+    # is the more specific one and must win rather than silently half-applying.
+    sci = _make_sci()
+    sci["ctd41cp_time"] = ("time", np.asarray(sci.rbrctd_time.values))
+    out = ctd.correct_ctd(sci, _cfg(), flt=_make_flt(sci))
+    assert "lag-corrected" in out.temperature.attrs["comment"]
+
+
+def test_cell_thermal_mass_zero_for_constant_temperature():
+    t = 1.78e9 + np.arange(50, dtype="f8")
+    T = np.full(50, 11.0)
+    np.testing.assert_allclose(ctd._cell_thermal_mass(T, t, 0.03, 7.0), T, atol=1e-15)
+
+
+def test_cell_thermal_mass_warms_the_cell_on_a_cooling_descent():
+    # Descending into colder water, the cell walls hold heat, so the water in the
+    # cell is warmer than ambient. Sign errors here go straight into salinity.
+    t = 1.78e9 + np.arange(100, dtype="f8")
+    T = np.where(np.arange(100) < 50, 12.0, 8.0)
+    out = ctd._cell_thermal_mass(T, t, 0.03, 7.0)
+    assert np.all(out[50:] >= T[50:])
+    assert out[50] > T[50]
+
+
+def test_cell_thermal_mass_uses_nyquist_of_the_sampling_interval():
+    # Pin the convention: f = 1/(2*dt), not 1/dt. The two differ by a factor of
+    # two in the filter coefficients.
+    dt, alpha, tau = 2.0, 0.03, 7.0
+    t = 1.78e9 + np.arange(3, dtype="f8") * dt
+    T = np.array([10.0, 11.0, 11.0])
+
+    f = 1.0 / (2.0 * dt)
+    a = 4 * f * alpha * tau / (1 + 4 * f * tau)
+    expected = T[1] - a * (T[1] - T[0])
+
+    out = ctd._cell_thermal_mass(T, t, alpha, tau)
+    np.testing.assert_allclose(out[1], expected, rtol=1e-12)
+
+
+def test_cell_thermal_mass_resets_across_gaps():
+    t = 1.78e9 + np.arange(40, dtype="f8")
+    t[20:] += 10 * ctd._GAP
+    T = 12.0 - 0.1 * np.arange(40)
+    out = ctd._cell_thermal_mass(T, t, 0.03, 7.0)
+    assert out[20] == T[20]  # correction reset to zero
+    assert out[19] != T[19]
+
+
+def test_correct_ctd41cp_interpolates_onto_the_full_science_grid():
+    sci = _make_sbe_sci()
+    t41 = sci.ctd41cp_time.values.copy()
+    t41[[0, 1]] = 0.0  # sensor silent at the start
+    t41[50:60] = 0.0  # and for ten rows in the middle
+    sci["ctd41cp_time"] = ("time", t41)
+
+    out = ctd.correct_ctd(sci, _sbe_cfg()).temperature_cell.values
+
+    assert np.all(np.isfinite(out[50:60]))  # interior gap is interpolated over
+    assert np.all(np.isnan(out[:2]))  # outside the sensor's span it is NaN
+
+
+def test_correct_ctd41cp_ignores_sensor_fill_values():
+    # Where the sensor has no data it fills temperature with exact zeros and
+    # zeroes its own timestamp. Zero degrees passes the QC bounds check, so the
+    # timestamp is what keeps a 12 degC step out of the recursion.
+    sci = _make_sbe_sci()
+    T = sci.temperature.values.copy()
+    t41 = sci.ctd41cp_time.values.copy()
+    T[100:110] = 0.0
+    t41[100:110] = 0.0
+    sci["temperature"] = ("time", T)
+    sci["ctd41cp_time"] = ("time", t41)
+
+    clean = ctd.correct_ctd(_make_sbe_sci(), _sbe_cfg()).temperature_cell.values
+    out = ctd.correct_ctd(sci, _sbe_cfg()).temperature_cell.values
+
+    np.testing.assert_allclose(out[:100], clean[:100], atol=1e-12)
+    reported = t41 > ctd._TS_SENTINEL
+    assert np.max(np.abs((out - T)[reported])) < 0.1  # no 12 degC step propagated
+
+
+def test_correct_ctd41cp_does_not_touch_temperature_or_conductivity():
+    sci = _make_sbe_sci()
+    before = sci.copy(deep=True)
+    out = ctd.correct_ctd(sci, _sbe_cfg())
+    xr.testing.assert_identical(out.temperature, before.temperature)
+    xr.testing.assert_identical(out.conductivity, before.conductivity)
+
+
+def test_correct_ctd41cp_honours_configured_parameters():
+    sci = _make_sbe_sci()
+    default = ctd.correct_ctd(_make_sbe_sci(), _sbe_cfg())
+    bigger = ctd.correct_ctd(sci, _sbe_cfg(alpha=0.12))
+
+    d_default = np.abs(default.temperature_cell - default.temperature).max()
+    d_bigger = np.abs(bigger.temperature_cell - bigger.temperature).max()
+    assert d_bigger > 2 * d_default
+
+
+def test_ctd41cp_on_real_data_is_a_small_correction():
+    # sl685 carries a pumped Sea-Bird. The correction should be a few hundredths
+    # of a degree through the thermocline: real, but not a rescaling.
+    conf = config.load_config()
+    ebd = str(resources.files("tests").joinpath("data/sl685.ebd.csv"))
+    sci = process_l1.apply_qc(
+        process_l1.format_l1(process_l1.parse_l1(ebd), conf), conf
+    )
+    assert "ctd41cp_time" in sci  # fixture carries the selector
+    assert "rbrctd_time" not in sci
+
+    out = ctd.correct_ctd(sci, conf)
+
+    # Only on rows the sensor reported: elsewhere `temperature` is a zero fill,
+    # so the difference there reflects the fill, not the correction.
+    reported = sci.ctd41cp_time.values > ctd._TS_SENTINEL
+    diff = (out.temperature_cell - out.temperature).values[reported]
+    diff = diff[np.isfinite(diff)]
+    assert diff.size > 0.9 * reported.sum()
+    assert 1e-4 < np.std(diff) < 0.05
+    assert np.max(np.abs(diff)) < 0.2

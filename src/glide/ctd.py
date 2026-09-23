@@ -1,9 +1,7 @@
-# Applies sensor lag and thermal mass corrections to the CTD temperature, then
-# re-interpolates the CTD variables from the sensor-native timestamp grid back
-# onto the science time grid. The lag-corrected temperature is reported as
-# `temperature`; salinity is calculated from `temperature_cell`, which is
-# additionally corrected for the thermal mass of the sensor and so estimates
-# the temperature of the water in the conductivity cell.
+# Applies lag and thermal mass corrections to the CTD temperature, for the RBR
+# legato and the pumped Sea-Bird. Both sensors report `temperature` with at most
+# a lag correction applied, and both add `temperature_cell`, the temperature of
+# the water in the conductivity cell, which is what salinity is calculated from.
 
 from __future__ import annotations
 
@@ -27,29 +25,39 @@ _RBRCTD_VARS = (
 
 _TS_SENTINEL = 946684800  # 2000-01-01T00:00:00Z
 
-# Default correction parameters for the RBR legato, overridable under the
-# `ctd: rbrctd:` section of the user config.
+# Presence of this variable selects the Sea-Bird correction. It is a sensor
+# timestamp but is deliberately not used as one; see core.yml.
+_CTD41CP_VAR = "ctd41cp_time"
+
+# Default correction parameters per sensor, overridable under the `ctd:` section
+# of the user config, which mirrors this layout.
 DEFAULTS = dict(
-    temperature_lag=0.9,  # s, manufacturer specified
-    thermal_mass=dict(
-        bulk=dict(
-            alpha_prefactor=0.05,
-            alpha_exponent=-0.83,
-            tau_prefactor=334.21,
-            tau_exponent=0.03,
+    rbrctd=dict(
+        temperature_lag=0.9,  # s, manufacturer specified
+        thermal_mass=dict(
+            bulk=dict(
+                alpha_prefactor=0.05,
+                alpha_exponent=-0.83,
+                tau_prefactor=334.21,
+                tau_exponent=0.03,
+            ),
+            long=dict(
+                alpha_prefactor=0.18,
+                alpha_exponent=-1.1,
+                tau_prefactor=179.0,
+                tau_exponent=0.0,
+            ),
+            short=dict(
+                alpha_prefactor=0.23,
+                alpha_exponent=-0.82,
+                tau_prefactor=27.15,
+                tau_exponent=-0.58,
+            ),
         ),
-        long=dict(
-            alpha_prefactor=0.18,
-            alpha_exponent=-1.1,
-            tau_prefactor=179.0,
-            tau_exponent=0.0,
-        ),
-        short=dict(
-            alpha_prefactor=0.23,
-            alpha_exponent=-0.82,
-            tau_prefactor=27.15,
-            tau_exponent=-0.58,
-        ),
+    ),
+    ctd41cp=dict(
+        alpha=0.03,  # fractional amplitude error, Sea-Bird pumped default
+        tau=7.0,  # s, response time, Sea-Bird pumped default
     ),
 )
 
@@ -142,6 +150,44 @@ def _correct_thermal_mass(
     )
 
 
+def _cell_thermal_mass(
+    T: np.ndarray, time_s: np.ndarray, alpha: float, tau: float
+) -> np.ndarray:
+    """Return the conductivity cell temperature for constant ``alpha`` and ``tau``.
+
+    The pumped Sea-Bird flushes its cell at a rate set by the pump rather than by
+    the glider, so unlike the legato its coefficients do not depend on speed. The
+    correction is the Morison et al. (1994) recursive filter, evaluated at the
+    Nyquist frequency of each sampling interval, and is subtracted: the water in
+    the cell is warmer than ambient while the glider descends into colder water.
+    """
+    dt = np.diff(time_s)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        f = 1.0 / (2.0 * dt)
+    a = 4 * f * alpha * tau / (1 + 4 * f * tau)
+    b = 1 - 2 * a / alpha
+
+    corr = np.zeros_like(T)
+    for i in range(1, T.size):
+        if not (0 < dt[i - 1] <= _GAP):
+            continue
+        corr[i] = -b[i - 1] * corr[i - 1] + a[i - 1] * (T[i] - T[i - 1])
+    return T - corr
+
+
+def _add_temperature_cell(
+    sci: xr.Dataset, values: np.ndarray, config: dict
+) -> xr.Dataset:
+    """Add ``temperature_cell`` to ``sci`` with its CF attrs from the config."""
+    specs = config.get("variables", {}).get("temperature_cell", {})
+    sci["temperature_cell"] = (
+        sci["temperature"].dims,
+        values,
+        specs.get("CF", {}),
+    )
+    return sci
+
+
 def _interp_finite(x: np.ndarray, y: np.ndarray, xi: np.ndarray) -> np.ndarray | None:
     """Interpolate ``y(x)`` onto ``xi``, ignoring non-finite source values."""
     ok = np.isfinite(x) & np.isfinite(y)
@@ -220,43 +266,17 @@ def _time_as_seconds(t: xr.DataArray) -> np.ndarray:
     return np.asarray(vals, dtype="f8")
 
 
-def correct_ctd(
-    sci: xr.Dataset, config: dict, flt: xr.Dataset | None = None
+def _correct_rbrctd(
+    sci: xr.Dataset, cfg: dict, config: dict, flt: xr.Dataset | None
 ) -> xr.Dataset:
-    """Apply CTD lag and thermal mass corrections to the science dataset.
+    """Lag and thermal mass correction for the RBR legato.
 
-    For the RBR legato: shift temperature earlier in time on the native
-    ``rbrctd_time`` grid by ``ctd.rbrctd.temperature_lag`` seconds, then
-    interpolate the lag-shifted temperature and the unadjusted conductivity
-    back onto ``sci.time``, overwriting ``temperature`` and ``conductivity``.
-    The lag-shifted temperature is further corrected for the thermal mass of
-    the sensor and added as ``temperature_cell``, which is what
-    ``process_l1.calculate_thermodynamics`` calculates salinity from. The
-    thermal mass correction depends on an estimate of glider speed, so it is
-    skipped if no flight data is provided.
-
-    Parameters
-    ----------
-    sci : xr.Dataset
-        Formatted science dataset, before merging with flight.
-    config : dict
-        Configuration; correction parameters are read from `ctd: rbrctd:`.
-    flt : xr.Dataset, optional
-        Formatted flight dataset, used for pitch and latitude.
-
-    Returns
-    -------
-    xr.Dataset
-        ``sci`` unchanged when the rbrctd variables are not present. Other CTDs
-        are not yet supported.
+    Shifts temperature earlier in time on the native ``rbrctd_time`` grid by
+    ``temperature_lag`` seconds, interpolates the lag-shifted temperature and the
+    unadjusted conductivity back onto ``sci.time``, then adds the additionally
+    thermal mass corrected ``temperature_cell``. The thermal mass stages need an
+    estimate of glider speed, so they are skipped without flight data.
     """
-    if not all(v in sci.variables for v in _RBRCTD_VARS):
-        _log.debug(
-            "rbrctd variables not present in science dataset; skipping CTD correction"
-        )
-        return sci
-
-    cfg = _deep_merge(DEFAULTS, (config.get("ctd") or {}).get("rbrctd") or {})
     lag_s = float(cfg["temperature_lag"])
 
     t_native, T, C = _build_native_rbrctd(sci)
@@ -288,10 +308,70 @@ def correct_ctd(
         return sci
 
     T_cell = _correct_thermal_mass(T_lag, U, t_native, cfg["thermal_mass"])
-    specs = config.get("variables", {}).get("temperature_cell", {})
-    sci["temperature_cell"] = (
-        sci["temperature"].dims,
-        np.interp(sci_t, t_native, T_cell, left=np.nan, right=np.nan),
-        specs.get("CF", {}),
+    return _add_temperature_cell(
+        sci, np.interp(sci_t, t_native, T_cell, left=np.nan, right=np.nan), config
     )
+
+
+def _correct_ctd41cp(sci: xr.Dataset, cfg: dict, config: dict) -> xr.Dataset:
+    """Cell thermal mass correction for the pumped Sea-Bird CTD.
+
+    The Sea-Bird reports through the canonical ``temperature`` variable on the
+    science time grid, so unlike the legato there is no native grid to rebuild
+    and no lag to remove: only ``temperature_cell`` is added.
+
+    The filter runs over the samples the sensor actually reported, which
+    ``ctd41cp_time`` identifies: elsewhere the sensor fills temperature with
+    exact zeros, and those pass the QC bounds check but would enter the
+    recursion as multi-degree steps. The result is then interpolated onto the
+    full science time grid.
+    """
+    t = _time_as_seconds(sci["time"])
+    T = np.asarray(sci["temperature"].values, dtype="f8")
+    reported = np.asarray(sci[_CTD41CP_VAR].values, dtype="f8") > _TS_SENTINEL
+    ok = reported & np.isfinite(T) & np.isfinite(t)
+    if ok.sum() < 2:
+        _log.warning("ctd41cp has fewer than 2 valid samples; skipping correction")
+        return sci
+
+    T_cell = _cell_thermal_mass(T[ok], t[ok], float(cfg["alpha"]), float(cfg["tau"]))
+    return _add_temperature_cell(
+        sci, np.interp(t, t[ok], T_cell, left=np.nan, right=np.nan), config
+    )
+
+
+def correct_ctd(
+    sci: xr.Dataset, config: dict, flt: xr.Dataset | None = None
+) -> xr.Dataset:
+    """Apply CTD lag and thermal mass corrections to the science dataset.
+
+    The sensor is identified from the variables present: the RBR legato by its
+    ``rbrctd_*`` suite, the pumped Sea-Bird by ``ctd41cp_time``. Both leave the
+    reported ``conductivity`` unadjusted and add ``temperature_cell``, which is
+    what ``process_l1.calculate_thermodynamics`` calculates salinity from.
+
+    Parameters
+    ----------
+    sci : xr.Dataset
+        Formatted science dataset, before merging with flight.
+    config : dict
+        Configuration; correction parameters are read from the `ctd:` section.
+    flt : xr.Dataset, optional
+        Formatted flight dataset, used by the legato correction for pitch and
+        latitude.
+
+    Returns
+    -------
+    xr.Dataset
+        ``sci`` unchanged when no recognised CTD is present.
+    """
+    cfg = _deep_merge(DEFAULTS, config.get("ctd") or {})
+
+    if all(v in sci.variables for v in _RBRCTD_VARS):
+        return _correct_rbrctd(sci, cfg["rbrctd"], config, flt)
+
+    if _CTD41CP_VAR in sci.variables:
+        return _correct_ctd41cp(sci, cfg["ctd41cp"], config)
+
+    _log.debug("No recognised CTD variables in science dataset; skipping correction")
     return sci
