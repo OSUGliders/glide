@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -31,7 +32,7 @@ _CTD41CP_VAR = "ctd41cp_time"
 
 # Default correction parameters per sensor, overridable under the `ctd:` section
 # of the user config, which mirrors this layout.
-DEFAULTS = dict(
+DEFAULTS: dict[str, dict[str, Any]] = dict(
     rbrctd=dict(
         temperature_lag=0.9,  # s, manufacturer specified
         thermal_mass=dict(
