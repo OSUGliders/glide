@@ -159,7 +159,9 @@ l1_variables: {}
 # error changes salinity by well under a thousandth of a psu.
 #
 # ctd41cp (pumped Sea-Bird): the pump sets the flow through the cell, so alpha
-# and tau are constants and no speed estimate is needed.
+# and tau are constants and no speed estimate is needed. The correction is
+# insensitive to them at this level: halving alpha changes salinity by about a
+# hundredth of a psu, and the choice of clock by a ten-thousandth.
 #
 # Every value below is optional; the defaults shown are applied when a key is
 # omitted. They are the manufacturer specified values for the RBR legato.

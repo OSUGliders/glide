@@ -25,8 +25,8 @@ _RBRCTD_VARS = (
 
 _TS_SENTINEL = 946684800  # 2000-01-01T00:00:00Z
 
-# Presence of this variable selects the Sea-Bird correction. It is a sensor
-# timestamp but is deliberately not used as one; see core.yml.
+# The Sea-Bird correction runs on this clock, and its presence is also what
+# selects that correction.
 _CTD41CP_VAR = "ctd41cp_time"
 
 # Default correction parameters per sensor, overridable under the `ctd:` section
@@ -162,14 +162,19 @@ def _cell_thermal_mass(
     the cell is warmer than ambient while the glider descends into colder water.
     """
     dt = np.diff(time_s)
+    # A repeated timestamp gives an infinite frequency and a NaN coefficient;
+    # the loop below never uses those, so silence the arithmetic.
     with np.errstate(divide="ignore", invalid="ignore"):
         f = 1.0 / (2.0 * dt)
-    a = 4 * f * alpha * tau / (1 + 4 * f * tau)
-    b = 1 - 2 * a / alpha
+        a = 4 * f * alpha * tau / (1 + 4 * f * tau)
+        b = 1 - 2 * a / alpha
 
     corr = np.zeros_like(T)
     for i in range(1, T.size):
-        if not (0 < dt[i - 1] <= _GAP):
+        if dt[i - 1] > _GAP:
+            continue  # reset the filter state across a real data gap
+        if dt[i - 1] <= 0:
+            corr[i] = corr[i - 1]  # repeated timestamp: no time has elapsed
             continue
         corr[i] = -b[i - 1] * corr[i - 1] + a[i - 1] * (T[i] - T[i - 1])
     return T - corr
@@ -320,21 +325,30 @@ def _correct_ctd41cp(sci: xr.Dataset, cfg: dict, config: dict) -> xr.Dataset:
     science time grid, so unlike the legato there is no native grid to rebuild
     and no lag to remove: only ``temperature_cell`` is added.
 
-    The filter runs over the samples the sensor actually reported, which
-    ``ctd41cp_time`` identifies: elsewhere the sensor fills temperature with
-    exact zeros, and those pass the QC bounds check but would enter the
-    recursion as multi-degree steps. The result is then interpolated onto the
-    full science time grid.
+    Like the legato correction it runs on the sensor's own clock,
+    ``ctd41cp_time``, which also identifies the samples the sensor actually
+    reported: elsewhere it fills temperature with exact zeros, and those pass
+    the QC bounds check but would enter the recursion as multi-degree steps.
+
+    Unlike the legato there is one sensor timestamp per science row, so each
+    corrected value belongs to a known row and goes back to it directly.
+    Interpolating in sensor time would instead shift every value by the offset
+    between the two clocks. Rows the sensor skipped are filled by interpolating
+    in science time.
     """
     t = _time_as_seconds(sci["time"])
     T = np.asarray(sci["temperature"].values, dtype="f8")
-    reported = np.asarray(sci[_CTD41CP_VAR].values, dtype="f8") > _TS_SENTINEL
-    ok = reported & np.isfinite(T) & np.isfinite(t)
+    t_sensor = np.asarray(sci[_CTD41CP_VAR].values, dtype="f8")
+    ok = (t_sensor > _TS_SENTINEL) & np.isfinite(T) & np.isfinite(t)
     if ok.sum() < 2:
         _log.warning("ctd41cp has fewer than 2 valid samples; skipping correction")
         return sci
 
-    T_cell = _cell_thermal_mass(T[ok], t[ok], float(cfg["alpha"]), float(cfg["tau"]))
+    order = np.argsort(t_sensor[ok], kind="stable")
+    T_cell = np.empty(int(ok.sum()))
+    T_cell[order] = _cell_thermal_mass(
+        T[ok][order], t_sensor[ok][order], float(cfg["alpha"]), float(cfg["tau"])
+    )
     return _add_temperature_cell(
         sci, np.interp(t, t[ok], T_cell, left=np.nan, right=np.nan), config
     )

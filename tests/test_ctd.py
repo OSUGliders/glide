@@ -606,3 +606,44 @@ def test_ctd41cp_on_real_data_is_a_small_correction():
     assert diff.size > 0.9 * reported.sum()
     assert 1e-4 < np.std(diff) < 0.05
     assert np.max(np.abs(diff)) < 0.2
+
+
+def test_cell_thermal_mass_carries_state_through_a_repeated_timestamp():
+    # The sensor clock repeats a timestamp occasionally. No time has elapsed, so
+    # the correction must carry forward rather than reset to zero.
+    t = 1.78e9 + np.array([0.0, 1.0, 1.0, 2.0])
+    T = np.array([10.0, 11.0, 11.0, 11.0])
+
+    out = ctd._cell_thermal_mass(T, t, 0.03, 7.0)
+
+    assert np.all(np.isfinite(out))
+    np.testing.assert_allclose(out[2] - T[2], out[1] - T[1], rtol=1e-12)
+    assert out[1] != T[1]  # and the carried state is not zero
+
+
+def test_ctd41cp_result_is_not_shifted_by_the_clock_offset():
+    # The filter runs on the sensor clock but each value belongs to the row it
+    # came from. Interpolating in sensor time would shift every value by the
+    # offset between the clocks, which this pins against.
+    sci = _make_sbe_sci()
+    T = np.asarray(sci.temperature.values, dtype="f8")
+    t_sensor = np.asarray(sci.ctd41cp_time.values, dtype="f8")
+    expected = ctd._cell_thermal_mass(T, t_sensor, 0.03, 7.0)
+
+    out = ctd.correct_ctd(sci, _sbe_cfg()).temperature_cell.values
+
+    np.testing.assert_allclose(out, expected, atol=1e-12)
+
+
+def test_ctd41cp_sorts_a_non_monotonic_sensor_clock():
+    sci = _make_sbe_sci()
+    t41 = np.asarray(sci.ctd41cp_time.values, dtype="f8")
+    t41[[80, 81]] = t41[[81, 80]]  # two samples logged out of order
+    sci["ctd41cp_time"] = ("time", t41)
+
+    out = ctd.correct_ctd(sci, _sbe_cfg()).temperature_cell.values
+
+    assert np.all(np.isfinite(out))
+    # the swap is local: samples well away from it are untouched
+    clean = ctd.correct_ctd(_make_sbe_sci(), _sbe_cfg()).temperature_cell.values
+    np.testing.assert_allclose(out[:80], clean[:80], atol=1e-12)

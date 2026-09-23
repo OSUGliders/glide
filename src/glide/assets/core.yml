@@ -561,10 +561,9 @@ suites:
           temperature of the water in the conductivity cell. Salinity is
           calculated from this rather than from the reported temperature.
 
-    # Presence of this variable is what selects the Sea-Bird correction; it is
-    # not used as a time base. The sensor clock differs from the science clock
-    # by a jittery ~0.5 s, which moves the corrected salinity by under 0.0001
-    # psu, and it carries occasional multi-minute outliers.
+    # The Sea-Bird correction runs on this clock, and its presence is also what
+    # selects that correction: where the sensor has no data it zeroes this and
+    # fills temperature with zeros, which pass the QC bounds check.
     ctd41cp_time:
       source: sci_ctd41cp_timestamp
       drop_from_l2: True
