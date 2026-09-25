@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+import yaml
 from scipy.signal import coherence, csd
 
 from glide import config, ctd, process_l1
@@ -250,7 +251,7 @@ def test_lag_removes_high_frequency_ct_phase(rbr_native):
     # Resample the longest gap-free dive segment onto a uniform 1 Hz grid,
     # then compare the C–T phase before and after the configured lag shift.
     t, T, C = _longest_segment(*rbr_native)
-    lag = config.load_config()["ctd"]["rbrctd"]["temperature_lag"]
+    lag = ctd.DEFAULTS["rbrctd"]["temperature_lag"]
 
     tu = np.arange(t[0], t[-1], 1.0 / _FS)
     Ti = np.interp(tu, t, T)
@@ -400,16 +401,27 @@ def test_partial_config_override_keeps_remaining_defaults():
     )
 
 
-def test_shipped_config_matches_module_defaults():
-    # config.yml documents the defaults; a drift between the two would mean the
-    # documented parameters are not the ones applied when a key is omitted.
-    shipped = config.load_config()["ctd"]
-    assert (
-        shipped["rbrctd"]["temperature_lag"]
-        == ctd.DEFAULTS["rbrctd"]["temperature_lag"]
-    )
-    assert shipped["rbrctd"]["thermal_mass"] == _TM
-    assert shipped["ctd41cp"] == ctd.DEFAULTS["ctd41cp"]
+def test_shipped_config_overrides_nothing():
+    # The shipped config leaves the section empty so the module defaults apply.
+    assert config.load_config()["ctd"] == {}
+
+
+def test_commented_config_block_matches_module_defaults():
+    # config.yml documents the defaults in a commented-out block. Uncommenting it
+    # must reproduce them exactly, or the file is documenting parameters that are
+    # not the ones glide applies.
+    text = resources.files("glide").joinpath("assets/config.yml").read_text()
+    lines = text.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("# ctd:"))
+
+    block = []
+    for ln in lines[start:]:
+        if not ln.startswith("#"):
+            break
+        block.append(ln[2:] if ln.startswith("# ") else ln[1:])
+
+    documented = yaml.safe_load("\n".join(block))
+    assert documented["ctd"] == ctd.DEFAULTS
 
 
 def test_speed_on_real_data_is_plausible():
