@@ -57,8 +57,12 @@ DEFAULTS: dict[str, dict[str, Any]] = dict(
         ),
     ),
     ctd41cp=dict(
-        alpha=0.03,  # fractional amplitude error, Sea-Bird pumped default
-        tau=7.0,  # s, response time, Sea-Bird pumped default
+        # Fitted to the 2026-IOP deployments by minimising the dive/climb
+        # disagreement in T-S space, over 23 profile pairs on each of two
+        # gliders. Sea-Bird's own suggestion, alpha 0.03 and tau 7 s, removes
+        # about a third as much of that disagreement.
+        alpha=0.015,  # fractional amplitude error
+        tau=30.0,  # s, response time
     ),
 )
 
