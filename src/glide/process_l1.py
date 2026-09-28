@@ -325,6 +325,8 @@ def merge(
             )
             continue
 
+        # Skipping the interpolation is half of what drop_from_l2 means; science
+        # side variables carry the flag too and are removed by drop_l2_variables.
         try:  # Only drop variables if the flag is explicitly set
             drop = config["variables"][v]["drop_from_l2"]
             if drop:
@@ -423,6 +425,28 @@ def calculate_thermodynamics(ds: xr.Dataset, config: dict) -> xr.Dataset:
     ds = qc.init_qc(ds, "N2")
 
     return ds
+
+
+def drop_l2_variables(ds: xr.Dataset, config: dict) -> xr.Dataset:
+    """Drop `drop_from_l2` variables that are still on the science time grid.
+
+    The flag means a variable does not belong on the science time grid of the L2
+    file, rather than that it cannot appear at all. Whether it survives is
+    therefore decided by its dimensions: `add_gps_fixes` moves the GPS fixes onto
+    `time_gps`, so those are kept, while anything still on `time` is removed,
+    whether it came across the merge or straight through from the science file.
+
+    Run this after the variables that get relocated have been placed.
+    """
+    drop = [
+        str(v)
+        for v in ds.data_vars
+        if config["variables"].get(str(v), {}).get("drop_from_l2", False)
+        and ds[v].dims == ("time",)
+    ]
+    if drop:
+        _log.debug("Dropping from L2 (drop_from_l2, still on time): %s", drop)
+    return ds.drop_vars(drop)
 
 
 def enforce_types(ds: xr.Dataset, config: dict) -> xr.Dataset:

@@ -21,6 +21,30 @@ def test_version() -> None:
     assert metadata_version("slocum-glide") in result.output
 
 
+def test_l2_drops_flagged_variables_from_the_time_grid() -> None:
+    # The CTD correction inputs are flagged drop_from_l2 and must not reach the
+    # file, while the GPS fixes carry the same flag and are kept on time_gps.
+    flt_file = str(resources.files("tests").joinpath("data/sl685.dbd.csv"))
+    sci_file = str(resources.files("tests").joinpath("data/sl685.ebd.csv"))
+    out_file = str(resources.files("tests").joinpath("data/slocum.dropflag.l2.nc"))
+    result = runner.invoke(app, ["l2", flt_file, sci_file, "-o", out_file])
+    assert result.exit_code == 0
+
+    config = load_config()
+    flagged = {v for v, s in config["variables"].items() if s.get("drop_from_l2")}
+    ds = xr.open_dataset(out_file)
+
+    on_time = {
+        str(v) for v in ds.variables if str(v) in flagged and ds[v].dims == ("time",)
+    }
+    assert not on_time, f"flagged variables left on the time grid: {on_time}"
+    assert "ctd41cp_time" not in ds.variables
+    assert ds.lat_gps.dims == ("time_gps",)
+    assert "temperature_cell" in ds.variables  # not flagged, so it stays
+
+    Path(out_file).unlink(missing_ok=True)
+
+
 def test_l1b() -> None:
     flt_file = str(resources.files("tests").joinpath("data/osu684.sbd.csv"))
     out_file = str(resources.files("tests").joinpath("data/slocum.l1b.nc"))

@@ -245,6 +245,8 @@ def l2(
 
     out = profiles.add_gps_fixes(out, flt, conf)
 
+    out = process_l1.drop_l2_variables(out, conf)
+
     out = process_l1.enforce_types(out, conf)
 
     out.attrs = {
