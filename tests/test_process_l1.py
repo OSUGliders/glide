@@ -1266,3 +1266,39 @@ def test_absorb_post_drift_transients_does_not_swallow_real_dive() -> None:
 
     prof._absorb_post_drift_transients(*arrs, drift_mask, 10.0, 180.0)
     assert np.array_equal(state, before)
+
+
+def test_drop_l2_variables_uses_the_dimensions() -> None:
+    # drop_from_l2 means "not on the science time grid": a flagged variable that
+    # has been relocated to another dimension, as add_gps_fixes does for the GPS
+    # fixes, is kept, and an unflagged variable on time is untouched.
+    config = dict(
+        variables=dict(
+            flagged_on_time=dict(drop_from_l2=True),
+            flagged_relocated=dict(drop_from_l2=True),
+            plain=dict(),
+        )
+    )
+    ds = xr.Dataset(
+        data_vars=dict(
+            flagged_on_time=("time", np.arange(3.0)),
+            flagged_relocated=("time_gps", np.arange(2.0)),
+            plain=("time", np.arange(3.0)),
+        ),
+        coords=dict(time=np.arange(3.0), time_gps=np.arange(2.0)),
+    )
+
+    out = pl1.drop_l2_variables(ds, config)
+
+    assert "flagged_on_time" not in out
+    assert "flagged_relocated" in out
+    assert "plain" in out
+
+
+def test_drop_l2_variables_leaves_unknown_variables_alone() -> None:
+    # Variables with no config entry, such as anything a user adds downstream.
+    ds = xr.Dataset(
+        data_vars=dict(mystery=("time", np.arange(3.0))),
+        coords=dict(time=np.arange(3.0)),
+    )
+    assert "mystery" in pl1.drop_l2_variables(ds, dict(variables={}))
