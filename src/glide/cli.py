@@ -35,7 +35,8 @@ app = typer.Typer()
 
 def version_callback(value: bool):
     if value:
-        typer.echo(f"glide version {version('glide')}")
+        # The distribution is slocum-glide; the import package is glide.
+        typer.echo(f"glide version {version('slocum-glide')}")
         raise typer.Exit()
 
 
