@@ -1,4 +1,5 @@
 from importlib import resources
+from importlib.metadata import version as metadata_version
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,15 @@ from glide.cli import app
 from glide.config import load_config
 
 runner = CliRunner()
+
+
+def test_version() -> None:
+    # The distribution name differs from the import package name, so this fails
+    # if the two drift apart again.
+    result = runner.invoke(app, ["--version"])
+
+    assert result.exit_code == 0
+    assert metadata_version("slocum-glide") in result.output
 
 
 def test_l1b() -> None:
