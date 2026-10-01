@@ -3,6 +3,7 @@ from importlib.metadata import version as metadata_version
 from pathlib import Path
 
 import numpy as np
+import pytest
 import xarray as xr
 from typer.testing import CliRunner
 
@@ -446,9 +447,11 @@ def test_l3_eps(tmp_path, slocum_l3_2m, make_eps_bin) -> None:
 
     ds = xr.open_dataset(out_file)
     assert ds.eps.dims == ("z", "profile_id")
-    for v in ("eps", "eps_qc", "eps_source_profile", "eps_overlap_fraction"):
-        assert v in ds.variables
-    np.testing.assert_array_equal(ds.eps_source_profile.values, [-1, 0, -1, 1])
+    assert "eps_qc" in ds.variables
+    # only the two climbs the microstructure was placed on carry data
+    covered = np.isfinite(ds.eps.values).any(axis=0)
+    np.testing.assert_array_equal(covered, [False, True, False, True])
+    assert ds.attrs["microstructure_source_file"] == str(eps_file)
 
 
 def test_l3_eps_refuses_a_mismatched_bin_size(tmp_path, slocum_l3_2m, make_eps_bin):
@@ -506,9 +509,10 @@ def test_merge_eps_rejects_l2(tmp_path, slocum_l3_2m, make_eps_bin) -> None:
     assert isinstance(result.exception, NotImplementedError)
 
 
-def test_merge_rejects_an_unknown_file_type(tmp_path, slocum_l3_2m) -> None:
+@pytest.mark.parametrize("file_type", ["nonsense", "p"])
+def test_merge_rejects_an_unknown_file_type(tmp_path, slocum_l3_2m, file_type) -> None:
     _, l3_file = slocum_l3_2m
     result = runner.invoke(
-        app, ["merge", l3_file, l3_file, "nonsense", "-o", str(tmp_path / "x.nc")]
+        app, ["merge", l3_file, l3_file, file_type, "-o", str(tmp_path / "x.nc")]
     )
     assert result.exit_code != 0

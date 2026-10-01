@@ -7,10 +7,11 @@ import numpy as np
 import xarray as xr
 from numpy.typing import ArrayLike, NDArray
 
+from . import qc
+
 _log = logging.getLogger(__name__)
 
 _TOL = 1e-6  # m or s, tolerance for matching bin geometry
-_MISSING = 9  # QC flag for a bin no microstructure reached
 
 # Helper functions
 
@@ -376,8 +377,8 @@ def merge_eps_bin(
     Returns
     -------
     xr.Dataset
-        ``ds`` with the microstructure variables, their QC companions, and the
-        `eps_source_profile` and `eps_overlap_fraction` provenance variables added.
+        ``ds`` with the microstructure variables and their QC companions added,
+        and the source file and instrument serial recorded in its attributes.
     """
     eps_bin_size = _eps_bin_size(ds_eps)
     _check_bin_size(bin_size, eps_bin_size)
@@ -398,7 +399,7 @@ def merge_eps_bin(
     )
 
     variables = _select_eps_variables(ds, ds_eps, config)
-    assigned, fraction = _assign_eps_profiles(ds, ds_eps)
+    assigned, _ = _assign_eps_profiles(ds, ds_eps)
 
     dims = ("z", "profile_id")
     missing_dims = [d for d in dims if d not in ds.sizes]
@@ -413,7 +414,7 @@ def merge_eps_bin(
             if v not in ds_eps.data_vars:
                 continue
             is_flag = v.endswith("_qc")
-            fill = _MISSING if is_flag else np.nan
+            fill = qc.MISSING if is_flag else np.nan
             out = np.full(shape, fill, dtype="i1" if is_flag else "f4")
 
             source = ds_eps[v].values
@@ -430,78 +431,34 @@ def merge_eps_bin(
         if f"{name}_qc" in ds_eps.data_vars:
             ds[name].attrs["ancillary_variables"] = f"{name}_qc"
 
-    source_profile = np.where(assigned >= 0, np.arange(assigned.size), -1)
-    ds["eps_source_profile"] = (
-        ("profile_id",),
-        _scatter_per_profile(
-            assigned, source_profile, ds.sizes["profile_id"], -1, "i4"
-        ),
-        {
-            "long_name": "Source microstructure profile index",
-            "comment": (
-                "Index of the profile in the pyturb eps-bin file that was merged "
-                "into this L3 profile, assigned by maximum overlap of the "
-                "microstructure bin times with the profile time window. -1 where "
-                "no microstructure was merged."
-            ),
-            # No _FillValue: decoding -1 to NaN would make an index variable
-            # float on read, and nothing downstream needs the NaN.
-        },
-    )
-    ds["eps_overlap_fraction"] = (
-        ("profile_id",),
-        _scatter_per_profile(assigned, fraction, ds.sizes["profile_id"], np.nan, "f4"),
-        {
-            "long_name": "Microstructure profile overlap fraction",
-            "units": "1",
-            "comment": (
-                "Fraction of the source microstructure profile's bin times that "
-                "fall inside this L3 profile's time window."
-            ),
-        },
-    )
-
-    ds.attrs.update(_provenance(ds_eps, eps_bin_size, assigned))
+    ds.attrs.update(_provenance(ds_eps))
     return ds
 
 
-def _scatter_per_profile(
-    assigned: NDArray, values: NDArray, n_profiles: int, fill, dtype: str
-) -> NDArray:
-    """Place per-microstructure-profile values onto the L3 profile dimension."""
-    out = np.full(n_profiles, fill, dtype=dtype)
-    ok = assigned >= 0
-    out[assigned[ok]] = values[ok]
-    return out
+def _provenance(ds_eps: xr.Dataset) -> dict:
+    """Global attributes naming the microstructure file and the instrument.
 
-
-def _provenance(ds_eps: xr.Dataset, eps_bin_size: float, assigned: NDArray) -> dict:
-    """Global attributes recording where the microstructure came from.
-
-    Instrument details are taken from the per-profile variables where they exist,
-    because the global attributes in an eps-bin file describe only the first p file
-    it was built from.
+    Deliberately minimal: everything else about the processing is recorded in the
+    eps-bin file itself, which these two attributes are enough to find. The serial
+    number comes from the per-profile variable rather than the global attribute,
+    because the globals in an eps-bin file describe only the first p file it was
+    built from.
     """
-    attrs = {
-        "microstructure_bin_size": eps_bin_size,
-        "microstructure_profiles_assigned": f"{int((assigned >= 0).sum())}/{assigned.size}",
-    }
-    for key, source in (
-        ("microstructure_instrument_model", "instrument_model"),
-        ("microstructure_pyturb_version", "pyturb_version"),
-        ("microstructure_source_file", "source_file"),
-    ):
-        if source in ds_eps.attrs:
-            attrs[key] = ds_eps.attrs[source]
+    attrs = {}
 
-    for key, name in (
-        ("microstructure_instrument_sn", "instrument_sn"),
-        ("microstructure_instrument_vehicle", "instrument_vehicle"),
-    ):
-        if name not in ds_eps.variables:
-            continue
-        unique = np.unique(ds_eps[name].values.astype(str))
-        attrs[key] = ", ".join(unique)
-        if unique.size > 1:
-            _log.warning("Microstructure file contains several %s: %s", name, unique)
+    source = ds_eps.encoding.get("source")
+    if source is not None:
+        attrs["microstructure_source_file"] = str(source)
+
+    if "instrument_sn" in ds_eps.variables:
+        serial = np.unique(ds_eps["instrument_sn"].values.astype(str))
+        attrs["microstructure_instrument_sn"] = ", ".join(serial)
+        if serial.size > 1:
+            _log.warning(
+                "Microstructure file contains several instrument serial numbers: %s",
+                serial,
+            )
+    elif "instrument_sn" in ds_eps.attrs:
+        attrs["microstructure_instrument_sn"] = str(ds_eps.attrs["instrument_sn"])
+
     return attrs

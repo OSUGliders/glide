@@ -9,7 +9,7 @@ Our definitions of data processing levels are guided by [NASA](https://www.earth
 * **L0**: Binary files produced by Slocum gliders include `.dbd`, `.sbd`, `.ebd`, `.tbd` or their compressed counterparts `.dcd`, ... etc. 
 * **L1**: NetCDF or csv timeseries of flight and science data generated using `dbd2netcdf`. Usually named `glidername.dbd.nc` and `glidername.ebd.nc` or something similar. No quality control is performed. Data have the same units as in [masterdata](https://gliderfs.coas.oregonstate.edu/gliderweb/masterdata/).
 * **L2**: Variable units are converted to oceanographic standards. Quality controls are applied. Some missing data are interpolated. Dead reckoned GPS positions are adjusted using surface GPS fixes; valid GPS fixes are also written on a dedicated `time_gps` dimension. Thermodynamic variables, such as potential density, are derived. Profiles are identified and tagged with `profile_id`. Depth-averaged velocity is reported on a `time_uv` dimension. Science and flight variables specified in the configuration file are merged into a single file.
-* **L3**: The L2 data are binned in depth and separated into profiles. Ancillery datasets may be merged: real-time MicroRider data processed using [`q2netcdf`](github.com/OSUGliders/q2netcdf), or post-processed microstructure from `pyturb`, which arrives already depth-binned per profile as `.eps-bin.nc`.
+* **L3**: The L2 data are binned in depth and separated into profiles. Ancillery datasets may be merged: real-time MicroRider data processed using [`q2netcdf`](github.com/OSUGliders/q2netcdf), or post-processed microstructure from [`pyturb`](github.com/oceancascades/pyturb).
 
 We also provide the following intermediate processing outputs that may be useful for debugging issues:
 
@@ -86,32 +86,12 @@ glide l3 glidername.l2.nc -o glidername.l3.nc -c glidername.config.yml -b 10
 
 ### Merging microstructure
 
-Real-time MicroRider data from `q2netcdf` is a timeseries, so `glide` bins it
-itself with `-q`. Post-processed microstructure from `pyturb` is different: it
-arrives already depth-binned per profile, so `glide` places it rather than
-re-binning it.
+Real-time MicroRider data from `q2netcdf` is a timeseries, so `glide` bins it itself with `-q`. Bin-averaged post-processed microstructure from `pyturb` can be incorporated using the `merge` or `l3` commands if the bin size matches the glide bin size exactly. Currently, post-processed timeseries of profiles cannot be incorporated.
 
 ```
 glide l3 glidername.l2.nc -o glidername.l3.nc -b 2 -e glidername.eps-bin.nc
 glide merge glidername.l3.nc glidername.eps-bin.nc eps -o glidername.l3.nc -w
 ```
-
-Two things to know:
-
-* **The L3 bin size must equal the bin size of the microstructure file**, because
-  the values are already depth averages and re-binning them would be lossy. A
-  2 m `.eps-bin.nc` therefore needs `-b 2`, and anything else is refused with an
-  error naming the bin size to use.
-* **Profiles are matched by time overlap**, using the time carried by each
-  microstructure bin: a microstructure profile joins the L3 profile whose time
-  window contains most of its bins. The `profile_time` in the microstructure file
-  is not used, as it marks the start of the microstructure record, which begins
-  while the glider is still descending. `eps_source_profile` and
-  `eps_overlap_fraction` in the output record which profile was matched and how
-  well, so the alignment can be checked after the fact.
-
-Which variables are imported is set by the `merged_variables` section of the
-configuration file; a matching `<name>_qc` is carried across automatically.
 
 To extract dead-reckoned location data to CSV or just the surface fixes use the `gps` subcommand.
 

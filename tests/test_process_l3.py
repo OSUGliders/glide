@@ -5,6 +5,7 @@ import pytest
 import xarray as xr
 
 import glide.process_l3 as pl3
+import glide.qc as qc
 from glide.config import load_config
 
 
@@ -235,7 +236,6 @@ def test_merge_eps_bin_places_values_on_the_right_profiles(slocum_l3_2m, make_ep
     # only the two climbs carry data
     covered = np.isfinite(out.eps.values).any(axis=0)
     np.testing.assert_array_equal(covered, [False, True, False, True])
-    np.testing.assert_array_equal(out.eps_source_profile.values, [-1, 0, -1, 1])
     # and the values are the source values, on the matching bins
     np.testing.assert_allclose(out.eps.values[:60, 1], eps.eps.values[0], rtol=1e-6)
 
@@ -250,22 +250,23 @@ def test_merge_eps_bin_follows_qc_companions(slocum_l3_2m, make_eps_bin):
     assert out.eps.attrs["ancillary_variables"] == "eps_qc"
     np.testing.assert_array_equal(out.eps_qc.attrs["flag_values"], [0, 1, 2, 4, 9])
     # bins no microstructure reached are flagged missing, not unknown
-    assert out.eps_qc.values[:, 0].tolist() == [9] * out.sizes["z"]
+    assert out.eps_qc.values[:, 0].tolist() == [qc.MISSING] * out.sizes["z"]
 
 
-def test_merge_eps_bin_records_provenance(slocum_l3_2m, make_eps_bin):
+def test_merge_eps_bin_records_the_source_and_the_instrument(
+    slocum_l3_2m, make_eps_bin
+):
     l3, _ = slocum_l3_2m
     eps = make_eps_bin(l3, targets=[1, 3])
+    eps.encoding["source"] = "somewhere/sl685.eps-bin.nc"
 
     out = pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
 
-    assert out.attrs["microstructure_bin_size"] == 2.0
-    assert out.attrs["microstructure_profiles_assigned"] == "2/2"
-    assert out.attrs["microstructure_instrument_model"] == "MR1000RDL-EM"
+    assert out.attrs["microstructure_source_file"] == "somewhere/sl685.eps-bin.nc"
     assert out.attrs["microstructure_instrument_sn"] == "435"
-    np.testing.assert_allclose(
-        out.eps_overlap_fraction.values, [np.nan, 1.0, np.nan, 1.0]
-    )
+    # and nothing else is added
+    added = {k for k in out.attrs if k.startswith("microstructure")}
+    assert added == {"microstructure_source_file", "microstructure_instrument_sn"}
 
 
 def test_merge_eps_bin_refuses_a_mismatched_grid(slocum_l3_2m, make_eps_bin):

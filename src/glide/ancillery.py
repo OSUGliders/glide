@@ -55,6 +55,10 @@ def parse_eps_bin(eps_file: str) -> xr.Dataset:
             f"dimension(s) {sorted(missing)}, found {dict(ds.sizes)}."
         )
 
+    # open_mfdataset does not record where the data came from, unlike
+    # open_dataset, and the merge puts this in the L3 attributes.
+    ds.encoding["source"] = eps_file
+
     _log.info(
         "Loaded %d microstructure profiles x %d depth bins",
         ds.sizes["profile"],
