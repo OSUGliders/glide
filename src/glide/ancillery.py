@@ -27,3 +27,37 @@ def parse_q(q_file: str) -> xr.Dataset:
     return xr.open_mfdataset(q_file, decode_timedelta=False)[
         ["e_1", "e_2", "pressure"]
     ].load()
+
+
+def parse_eps_bin(eps_file: str) -> xr.Dataset:
+    """Load depth-binned microstructure produced by pyturb.
+
+    Every variable is kept, unlike `parse_q`: `process_l3.merge_eps_bin` decides
+    which ones to import from the `merged_variables` configuration. Times are
+    decoded, because the per-bin `time` variable is what the profile alignment
+    uses and it has to arrive as datetime64.
+    """
+    _log.debug("Loading microstructure eps-bin files")
+    ds = xr.open_mfdataset(
+        eps_file,
+        concat_dim="profile",
+        combine="nested",
+        compat="override",
+        coords="minimal",
+        data_vars="minimal",
+        decode_timedelta=False,
+    ).load()
+
+    missing = {"profile", "depth"} - {str(d) for d in ds.sizes}
+    if missing:
+        raise ValueError(
+            f"{eps_file} does not look like a pyturb eps-bin file: missing "
+            f"dimension(s) {sorted(missing)}, found {dict(ds.sizes)}."
+        )
+
+    _log.info(
+        "Loaded %d microstructure profiles x %d depth bins",
+        ds.sizes["profile"],
+        ds.sizes["depth"],
+    )
+    return ds

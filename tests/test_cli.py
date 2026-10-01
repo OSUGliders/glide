@@ -429,3 +429,86 @@ def test_gps_fixes() -> None:
     assert len(df) > 0
     assert df["lat_gps"].notna().all()
     assert df["lon_gps"].notna().all()
+
+
+def test_l3_eps(tmp_path, slocum_l3_2m, make_eps_bin) -> None:
+    l3, _ = slocum_l3_2m
+    eps_file = tmp_path / "synthetic.eps-bin.nc"
+    make_eps_bin(l3, targets=[1, 3]).to_netcdf(eps_file)
+
+    l2_file = str(resources.files("tests").joinpath("data/slocum.l2.nc"))
+    out_file = str(tmp_path / "with_eps.l3.nc")
+    result = runner.invoke(
+        app,
+        ["l3", l2_file, "-o", out_file, "-b", "2", "-d", "750", "-e", str(eps_file)],
+    )
+    assert result.exit_code == 0, result.output
+
+    ds = xr.open_dataset(out_file)
+    assert ds.eps.dims == ("z", "profile_id")
+    for v in ("eps", "eps_qc", "eps_source_profile", "eps_overlap_fraction"):
+        assert v in ds.variables
+    np.testing.assert_array_equal(ds.eps_source_profile.values, [-1, 0, -1, 1])
+
+
+def test_l3_eps_refuses_a_mismatched_bin_size(tmp_path, slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps_file = tmp_path / "synthetic.eps-bin.nc"
+    make_eps_bin(l3, targets=[1]).to_netcdf(eps_file)
+
+    l2_file = str(resources.files("tests").joinpath("data/slocum.l2.nc"))
+    result = runner.invoke(
+        app,
+        [
+            "l3",
+            l2_file,
+            "-o",
+            str(tmp_path / "x.nc"),
+            "-b",
+            "1",
+            "-d",
+            "750",
+            "-e",
+            str(eps_file),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "binned at 2 m" in str(result.exception)
+
+
+def test_merge_eps(tmp_path, slocum_l3_2m, make_eps_bin) -> None:
+    l3, l3_file = slocum_l3_2m
+    eps_file = tmp_path / "synthetic.eps-bin.nc"
+    make_eps_bin(l3, targets=[1, 3]).to_netcdf(eps_file)
+
+    out_file = str(tmp_path / "merged.nc")
+    result = runner.invoke(
+        app, ["merge", l3_file, str(eps_file), "eps", "-o", out_file]
+    )
+    assert result.exit_code == 0, result.output
+    assert "eps" in xr.open_dataset(out_file).variables
+
+    # without --overwrite a second run must refuse rather than clobber
+    again = runner.invoke(app, ["merge", l3_file, str(eps_file), "eps", "-o", out_file])
+    assert again.exit_code != 0
+
+
+def test_merge_eps_rejects_l2(tmp_path, slocum_l3_2m, make_eps_bin) -> None:
+    l3, _ = slocum_l3_2m
+    eps_file = tmp_path / "synthetic.eps-bin.nc"
+    make_eps_bin(l3, targets=[1]).to_netcdf(eps_file)
+
+    l2_file = str(resources.files("tests").joinpath("data/slocum.l2.nc"))
+    result = runner.invoke(
+        app, ["merge", l2_file, str(eps_file), "eps", "-o", str(tmp_path / "x.nc")]
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, NotImplementedError)
+
+
+def test_merge_rejects_an_unknown_file_type(tmp_path, slocum_l3_2m) -> None:
+    _, l3_file = slocum_l3_2m
+    result = runner.invoke(
+        app, ["merge", l3_file, l3_file, "nonsense", "-o", str(tmp_path / "x.nc")]
+    )
+    assert result.exit_code != 0
