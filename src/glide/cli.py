@@ -331,8 +331,8 @@ def merge(
     file_type: Annotated[
         str,
         typer.Argument(
-            help="Choose 'q' for a q2netcdf output file, 'eps' for a pyturb "
-            "eps-bin file, 'p' for a p2netcdf output file."
+            help="Choose 'q' for a q2netcdf output file or 'eps' for a pyturb "
+            "eps-bin file."
         ),
     ],
     out_file: _out_file_annotation = "slocum.merged.nc",
@@ -350,8 +350,8 @@ def merge(
     Merge ancillary data into L2 or L3 data.
     """
 
-    if file_type not in ["q", "eps", "p"]:
-        raise typer.BadParameter(f"The file type {file_type} must be q, eps or p.")
+    if file_type not in ["q", "eps"]:
+        raise typer.BadParameter(f"The file type {file_type} must be q or eps.")
 
     if Path(out_file).exists() and not overwrite:
         raise typer.BadParameter(
@@ -400,9 +400,6 @@ def merge(
         eps = ancillery.parse_eps_bin(input_file)
         out = process_l3.merge_eps_bin(l3, eps, bin_size, conf)
         out.to_netcdf(out_file)
-
-    if file_type == "p":
-        raise NotImplementedError("Merging of p files is not yet supported.")
 
 
 @app.command()
