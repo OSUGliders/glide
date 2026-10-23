@@ -67,7 +67,7 @@ def initialise_test_data() -> xr.Dataset:
                     float("NaN"),
                 ],
             ),
-            "m_gps_lon": (
+            "lon_gps": (
                 "time",
                 [
                     122,
@@ -94,7 +94,7 @@ def initialise_test_data() -> xr.Dataset:
                     125,
                 ],
             ),
-            "m_gps_lat": (
+            "lat_gps": (
                 "time",
                 [
                     22,
@@ -192,9 +192,9 @@ def test_gps() -> None:
 
     m0, c0 = qc._fit_line(
         ds.time[3].values,
-        ds.m_gps_lon[3].values,
+        ds.lon_gps[3].values,
         ds.time[9].values,
-        ds.m_gps_lon[9].values,
+        ds.lon_gps[9].values,
     )
     m, c = qc._fit_line(
         ds.time[4].values, ds.lon[4].values, ds.time[8].values, ds.lon[8].values
