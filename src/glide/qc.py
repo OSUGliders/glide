@@ -309,8 +309,8 @@ def gps(ds: xr.Dataset, dt: float = 600) -> xr.Dataset:
     # Adjust dead reckoning
     _log.debug("Adjusting dead reckoning")
     time = ds.time.values
-    gps_lon = ds.lon_gps.values
-    gps_lat = ds.lat_gps.values
+    gps_lon = ds.m_gps_lon.values
+    gps_lat = ds.m_gps_lat.values
     depth = ds.m_depth.values
 
     idx_bound, idx_good_gps = _extract_surface_gps_groups(
@@ -388,14 +388,14 @@ def gps(ds: xr.Dataset, dt: float = 600) -> xr.Dataset:
     ds = _update_qc_flag(ds, "lon", 2, changed)
     ds = _update_qc_flag(ds, "lat", 2, changed)
 
-    # Finally, remove gps data that were flagged bad.
-    lon_gps_qc = np.full_like(gps_lon, np.nan)
-    lon_gps_qc[idx_good_gps] = gps_lon[idx_good_gps]
-    ds["lon_gps"] = (ds.lon_gps.dims, lon_gps_qc, ds.lon_gps.attrs)
+    # Finally, remove m_gps data that were flagged bad.
+    m_gps_lon = np.full_like(gps_lon, np.nan)
+    m_gps_lon[idx_good_gps] = gps_lon[idx_good_gps]
+    ds["m_gps_lon"] = (ds.m_gps_lon.dims, m_gps_lon, ds.m_gps_lon.attrs)
 
-    lat_gps_qc = np.full_like(gps_lat, np.nan)
-    lat_gps_qc[idx_good_gps] = gps_lat[idx_good_gps]
-    ds["lat_gps"] = (ds.lat_gps.dims, lat_gps_qc, ds.lat_gps.attrs)
+    m_gps_lat = np.full_like(gps_lat, np.nan)
+    m_gps_lat[idx_good_gps] = gps_lat[idx_good_gps]
+    ds["m_gps_lat"] = (ds.m_gps_lat.dims, m_gps_lat, ds.m_gps_lat.attrs)
 
     return ds
 
