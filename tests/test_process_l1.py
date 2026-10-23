@@ -131,6 +131,18 @@ def test_format_variables() -> None:
     assert hasattr(tbd.time, "units")
 
 
+def test_apply_qc_adjusts_dead_reckoning() -> None:
+    """qc.gps must run on formatted flight data (GPS vars renamed to lon_gps/lat_gps)."""
+    config = load_config()
+    flt = pl1.format_l1(get_test_data("684", "sbd"), config)
+    corrected = pl1.apply_qc(flt.copy(deep=True), config)
+    uncorrected = pl1.apply_qc(flt.drop_vars(["lon_gps", "lat_gps"]), config)
+
+    assert (corrected.lon_qc == 2).any()
+    diff = corrected.lon - uncorrected.lon.sel(time=corrected.time)
+    assert np.nanmax(np.abs(diff)) > 0
+
+
 def test_parse_l1() -> None:
     pl1.parse_l1(get_test_data("684", "sbd"))
     pl1.parse_l1(get_test_data("684", "tbd"))

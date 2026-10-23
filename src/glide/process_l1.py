@@ -262,12 +262,8 @@ def apply_qc(
     if dim in ds.coords:
         ds = ds.drop_vars([dim])
 
-    # Applying gps QC will only work on flight data
-    # so we need this to catch parsing of science data.
-    try:
+    if "lon_gps" in ds:  # Only flight data has GPS fixes
         ds = qc.gps(ds)
-    except AttributeError:
-        _log.debug("Failed to apply gps QC.")
 
     ds = qc.interpolate_missing(ds, config)
 
