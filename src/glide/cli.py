@@ -289,6 +289,15 @@ def l3(
         str | None,
         typer.Option("--q-in", "-q", help="netCDF file(s) processed by q2netcdf."),
     ] = None,
+    eps_netcdf: Annotated[
+        str | None,
+        typer.Option(
+            "--eps-in",
+            "-e",
+            help="netCDF file(s) of depth-binned microstructure from pyturb "
+            "(*.eps-bin.nc). The bin size must match --bin.",
+        ),
+    ] = None,
     config_file: _config_annotation = None,
 ) -> None:
     """
@@ -305,6 +314,10 @@ def l3(
 
         out = process_l3.bin_q(out, q, bin_size, conf)
 
+    if eps_netcdf is not None:
+        eps = ancillery.parse_eps_bin(eps_netcdf)
+        out = process_l3.merge_eps_bin(out, eps, bin_size, conf)
+
     out.to_netcdf(out_file)
 
 
@@ -318,7 +331,8 @@ def merge(
     file_type: Annotated[
         str,
         typer.Argument(
-            help="Choose 'q' for q2netcdf output file, 'p' for p for p2netcdf output file."
+            help="Choose 'q' for a q2netcdf output file or 'eps' for a pyturb "
+            "eps-bin file."
         ),
     ],
     out_file: _out_file_annotation = "slocum.merged.nc",
@@ -336,8 +350,8 @@ def merge(
     Merge ancillary data into L2 or L3 data.
     """
 
-    if file_type not in ["q", "p"]:
-        raise typer.BadParameter(f"The file type {file_type} must be q or p.")
+    if file_type not in ["q", "eps"]:
+        raise typer.BadParameter(f"The file type {file_type} must be q or eps.")
 
     if Path(out_file).exists() and not overwrite:
         raise typer.BadParameter(
@@ -377,8 +391,15 @@ def merge(
             raise NotImplementedError(
                 "Merging q files only supported for level 3 data."
             )
-    if file_type == "p":
-        raise NotImplementedError("Merging of p files is not yet supported.")
+    if file_type == "eps":
+        if input_file_level != 3:
+            raise NotImplementedError(
+                "Merging microstructure eps-bin files only supported for level 3 data."
+            )
+        l3, bin_size = process_l3.parse_l3(glide_file)
+        eps = ancillery.parse_eps_bin(input_file)
+        out = process_l3.merge_eps_bin(l3, eps, bin_size, conf)
+        out.to_netcdf(out_file)
 
 
 @app.command()

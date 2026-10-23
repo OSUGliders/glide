@@ -10,6 +10,24 @@ from numpy.typing import ArrayLike, NDArray
 
 _log = logging.getLogger(__name__)
 
+# The IOOS/ARGO quality flag scheme written onto every *_qc variable. Named here
+# so that other modules can refer to a flag rather than a bare integer.
+NO_QC_PERFORMED = 0
+GOOD = 1
+PROBABLY_GOOD = 2
+BAD_CORRECTABLE = 3
+BAD = 4
+VALUE_CHANGED = 5
+INTERPOLATED = 8
+MISSING = 9
+
+FLAG_VALUES = np.arange(10, dtype="i1")
+FLAG_MEANINGS = (
+    "no_qc_performed good_data probably_good_data "
+    "bad_data_that_are_potentially_correctable bad_data value_changed "
+    "not_used not_used interpolated_value missing_value"
+)
+
 
 # Helper functions
 
@@ -22,20 +40,20 @@ def _init_qc_variable(
     y = ds[variable]
 
     if flag_values is None:
-        flag_values = np.zeros_like(y, dtype="b")
-        flag_values[~np.isfinite(y)] = 9
+        flag_values = np.full_like(y, NO_QC_PERFORMED, dtype="b")
+        flag_values[~np.isfinite(y)] = MISSING
     else:
         flag_values = np.asarray(flag_values)
 
     qc_variable = variable + "_qc"
 
     qc_attrs = {
-        "flag_meanings": "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed not_used not_used interpolated_value missing_value",
-        "flag_values": np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], dtype="b"),
+        "flag_meanings": FLAG_MEANINGS,
+        "flag_values": FLAG_VALUES,
         "long_name": f"{y.attrs['long_name']} Quality Flag",
         "standard_name": f"{y.attrs['standard_name']} status_flag",
-        "valid_max": np.int8(9),
-        "valid_min": np.int8(0),
+        "valid_max": np.int8(FLAG_VALUES.max()),
+        "valid_min": np.int8(FLAG_VALUES.min()),
     }
 
     ds[qc_variable] = (y.dims, flag_values, qc_attrs)
@@ -108,8 +126,8 @@ def _apply_bounds_variable(ds: xr.Dataset, variable: str) -> xr.Dataset:
     # Update QC
     changed, unchanged = _changed_elements(y_original, y)
     _log.debug("%i flagged of %i total", changed.sum(), changed.size)
-    ds = _update_qc_flag(ds, variable, 4, changed)  # Outside bounds is bad
-    ds = _update_qc_flag(ds, variable, 2, unchanged)  # Within is probably good
+    ds = _update_qc_flag(ds, variable, BAD, changed)  # Outside bounds is bad
+    ds = _update_qc_flag(ds, variable, PROBABLY_GOOD, unchanged)  # Within is good
 
     return ds
 

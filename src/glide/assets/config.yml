@@ -186,9 +186,19 @@ ctd: {}
 # =============================================================================
 # MERGED VARIABLES
 # =============================================================================
-# Variables to be assimilated from external processing (e.g., microstructure
-# from q2netcdf). These are used in higher-level processing steps and do not
-# have a `source` field.
+# Variables to be assimilated from external processing: microstructure from
+# q2netcdf (e_1, e_2) or from pyturb (everything else below). These are used in
+# higher-level processing steps and do not have a `source` field.
+#
+# The key is the variable name in both the external file and the output. Only
+# variables declared here are imported, a matching `<name>_qc` follows
+# automatically, and declaring a name that glide already calculates is an error.
+# So do not declare: temperature, salinity, z, lat, lon, N2, absolute_salinity,
+# conservative_temperature, potential_density, time or profile_time.
+#
+# pyturb writes its own CF attributes, which win over the CF block here; the
+# block only fills gaps, and supplies units for files written before pyturb
+# started emitting them.
 
 merged_variables:
   e_1:
@@ -213,6 +223,94 @@ merged_variables:
       instrument: instrument_microrider
       observation_type: calculated
 
+  # Microstructure from pyturb (*.eps-bin.nc), placed onto the L3 grid by
+  # `glide l3 --eps-in` or `glide merge <l3> <eps-bin> eps`. The L3 bin size must
+  # match the bin size of the microstructure file.
+  eps:
+    CF:
+      long_name: TKE dissipation rate
+      standard_name: specific_turbulent_kinetic_energy_dissipation_in_sea_water
+      comment: Best estimate combined from both shear probes
+      units: W kg-1
+      instrument: instrument_microrider
+      observation_type: calculated
+
+  eps_1:
+    CF:
+      long_name: TKE dissipation rate
+      standard_name: specific_turbulent_kinetic_energy_dissipation_in_sea_water
+      comment: Estimated using shear probe 1
+      units: W kg-1
+      instrument: instrument_microrider
+      observation_type: calculated
+
+  eps_2:
+    CF:
+      long_name: TKE dissipation rate
+      standard_name: specific_turbulent_kinetic_energy_dissipation_in_sea_water
+      comment: Estimated using shear probe 2
+      units: W kg-1
+      instrument: instrument_microrider
+      observation_type: calculated
+
+  chi:
+    CF:
+      long_name: Temperature variance dissipation rate
+      comment: Best estimate combined from both thermistors
+      units: K2 s-1
+      instrument: instrument_microrider
+      observation_type: calculated
+
+  chi_1:
+    CF:
+      long_name: Temperature variance dissipation rate
+      comment: Estimated using thermistor 1
+      units: K2 s-1
+      instrument: instrument_microrider
+      observation_type: calculated
+
+  chi_2:
+    CF:
+      long_name: Temperature variance dissipation rate
+      comment: Estimated using thermistor 2
+      units: K2 s-1
+      instrument: instrument_microrider
+      observation_type: calculated
+
+  T1:
+    CF:
+      long_name: FP07 thermistor 1 temperature
+      units: degree_C
+      instrument: instrument_microrider
+      observation_type: measured
+
+  T2:
+    CF:
+      long_name: FP07 thermistor 2 temperature
+      units: degree_C
+      instrument: instrument_microrider
+      observation_type: measured
+
+  W:
+    CF:
+      long_name: Profiling speed used in the dissipation estimate
+      units: m s-1
+      instrument: instrument_microrider
+      observation_type: calculated
+
+  nu:
+    CF:
+      long_name: Kinematic viscosity of seawater
+      units: m2 s-1
+      instrument: instrument_microrider
+      observation_type: calculated
+
+  kappa_T:
+    CF:
+      long_name: Molecular thermal diffusivity
+      units: m2 s-1
+      instrument: instrument_microrider
+      observation_type: calculated
 
 # =============================================================================
 # FLIGHT MODEL
