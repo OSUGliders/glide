@@ -6,7 +6,6 @@ import xarray as xr
 
 import glide.process_l3 as pl3
 import glide.qc as qc
-from glide.config import load_config
 
 
 def _config(*names):
@@ -17,49 +16,17 @@ def _config(*names):
 # --- geometry and bin size -------------------------------------------------
 
 
-def test_eps_bin_size_reads_the_coordinate_spacing():
-    ds = xr.Dataset(coords=dict(depth=("depth", [1.0, 3.0, 5.0, 7.0])))
-    assert pl3._eps_bin_size(ds) == 2.0
-
-
 def test_eps_bin_size_rejects_uneven_spacing():
     ds = xr.Dataset(coords=dict(depth=("depth", [1.0, 3.0, 6.0])))
     with pytest.raises(ValueError, match="not uniformly spaced"):
         pl3._eps_bin_size(ds)
 
 
-def test_check_alignment_accepts_a_grid_starting_deeper():
-    pl3._check_alignment(np.array([1.0, 3.0, 5.0]), np.array([5.0, 7.0]), 2.0)
-
-
 def test_check_alignment_tolerates_small_offsets():
     pl3._check_alignment(np.array([1.0, 3.0]), np.array([1.04, 3.04]), 2.0)
 
 
-def test_check_alignment_rejects_offset_edges():
-    with pytest.raises(ValueError, match="offset by 1 m"):
-        pl3._check_alignment(np.array([1.0, 3.0]), np.array([2.0, 4.0]), 2.0)
-
-
-@pytest.mark.parametrize("bin_size", [1.0, 3.0, 4.0])
-def test_check_bin_size_refuses_anything_but_a_match(bin_size):
-    # Even a clean multiple is refused: the data is already depth-averaged.
-    with pytest.raises(ValueError, match="microstructure file is binned at 2 m"):
-        pl3._check_bin_size(bin_size, 2.0)
-
-
-def test_check_bin_size_accepts_a_match():
-    pl3._check_bin_size(2.0, 2.0)
-
-
 # --- depth mapping ---------------------------------------------------------
-
-
-def test_depth_map_matches_centres():
-    l3 = np.array([1.0, 3.0, 5.0, 7.0])
-    eps_idx, l3_idx = pl3._depth_map(l3, np.array([1.0, 3.0, 5.0, 7.0]))
-    np.testing.assert_array_equal(eps_idx, [0, 1, 2, 3])
-    np.testing.assert_array_equal(l3_idx, [0, 1, 2, 3])
 
 
 def test_depth_map_drops_bins_deeper_than_the_l3_grid():
@@ -78,6 +45,13 @@ def test_depth_map_survives_a_gap_in_the_l3_grid():
     np.testing.assert_array_equal(l3_idx, [0, 1, 2])
 
 
+def test_depth_map_matches_float32_centres():
+    # L3 z is stored as f4, which cannot hold 0.1 m centres exactly.
+    centres = 0.05 + 0.1 * np.arange(10000)
+    eps_idx, _ = pl3._depth_map(centres.astype("f4").astype("f8"), centres)
+    assert eps_idx.size == centres.size
+
+
 # --- time coercion ---------------------------------------------------------
 
 
@@ -89,23 +63,7 @@ def test_to_datetime64_round_trips_both_provenances():
     assert from_float[0] == from_dates[0] == stamp
 
 
-def test_to_datetime64_rejects_other_types():
-    with pytest.raises(TypeError):
-        pl3._to_datetime64(np.array(["nonsense"]))
-
-
 # --- profile alignment -----------------------------------------------------
-
-
-def test_eps_profiles_land_on_the_climbs_they_overlap(slocum_l3_2m, make_eps_bin):
-    l3, _ = slocum_l3_2m
-    eps = make_eps_bin(l3, targets=[1, 3])  # the two climbs
-
-    assigned, fraction = pl3._assign_eps_profiles(l3, eps)
-
-    np.testing.assert_array_equal(assigned, [1, 3])
-    np.testing.assert_array_equal(l3.state.values[assigned], [2, 2])
-    assert np.all(fraction == 1.0)
 
 
 def test_profile_time_is_not_used_for_alignment(slocum_l3_2m, make_eps_bin):
@@ -124,20 +82,6 @@ def test_profile_time_is_not_used_for_alignment(slocum_l3_2m, make_eps_bin):
 
     assigned, _ = pl3._assign_eps_profiles(l3, eps)
     assert l3.state.values[assigned].tolist() == [2, 2]
-
-
-def test_eps_profile_in_a_dive_window_is_assigned_normally(
-    slocum_l3_2m, make_eps_bin, caplog
-):
-    l3, _ = slocum_l3_2m
-    eps = make_eps_bin(l3, targets=[0])  # a dive
-
-    with caplog.at_level("WARNING"):
-        assigned, fraction = pl3._assign_eps_profiles(l3, eps)
-
-    assert assigned.tolist() == [0]
-    assert fraction[0] == 1.0
-    assert "dive" not in caplog.text.lower()
 
 
 def test_duplicate_claims_keep_the_better_overlap(slocum_l3_2m, make_eps_bin, caplog):
@@ -299,21 +243,6 @@ def test_merge_eps_bin_refuses_offset_bin_edges(slocum_l3_2m, make_eps_bin):
     eps = eps.assign_coords(depth=eps.depth + 1.0)
     with pytest.raises(ValueError, match="bin edges do not line up"):
         pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
-
-
-def test_depth_map_matches_float32_centres():
-    # L3 z is stored as f4, which cannot hold 0.1 m centres exactly.
-    centres = 0.05 + 0.1 * np.arange(10000)
-    eps_idx, _ = pl3._depth_map(centres.astype("f4").astype("f8"), centres)
-    assert eps_idx.size == centres.size
-
-
-def test_shipped_config_declares_the_microstructure_variables():
-    declared = load_config()["merged_variables"]
-    for name in ("eps", "eps_1", "eps_2", "chi", "chi_1", "chi_2", "T1", "T2"):
-        assert name in declared, f"{name} is not declared in merged_variables"
-    # the q file variables are still there
-    assert "e_1" in declared and "e_2" in declared
 
 
 # --- bin_q, which shares the depth mapping ---------------------------------

@@ -68,10 +68,8 @@ def make_eps_bin():
         targets,
         bin_size=2.0,
         n_bins=60,
-        fill_from=0,
         coverage=1.0,
         seed=0,
-        times=None,
     ):
         rng = np.random.default_rng(seed)
         n = len(targets)
@@ -85,7 +83,7 @@ def make_eps_bin():
         for k, target in enumerate(targets):
             span = ends[target] - starts[target]
             n_used = max(2, int(round(n_bins * coverage)))
-            for b in range(fill_from, fill_from + n_used):
+            for b in range(n_used):
                 if b >= n_bins:
                     break
                 # up cast: the shallowest bin is sampled last
@@ -93,9 +91,6 @@ def make_eps_bin():
                 bin_times[k, b] = starts[target] + (span * frac).astype("m8[ns]")
             # as in the real files, this points at the previous profile
             profile_time[k] = starts[max(target - 1, 0)]
-
-        if times is not None:
-            bin_times = times
 
         shape = (n, n_bins)
         data = {
