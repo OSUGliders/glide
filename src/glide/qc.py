@@ -10,8 +10,7 @@ from numpy.typing import ArrayLike, NDArray
 
 _log = logging.getLogger(__name__)
 
-# The IOOS/ARGO quality flag scheme written onto every *_qc variable. Named here
-# so that other modules can refer to a flag rather than a bare integer.
+# The IOOS/ARGO quality flag scheme written onto every *_qc variable.
 NO_QC_PERFORMED = 0
 GOOD = 1
 PROBABLY_GOOD = 2
@@ -27,9 +26,6 @@ FLAG_MEANINGS = (
     "bad_data_that_are_potentially_correctable bad_data value_changed "
     "not_used not_used interpolated_value missing_value"
 )
-
-
-# Helper functions
 
 
 def _init_qc_variable(
@@ -226,9 +222,6 @@ def _changed_elements(x: ArrayLike, y: ArrayLike) -> tuple[NDArray, NDArray]:
     both_nan = np.isnan(x) & np.isnan(y)
     changed = np.logical_not(unchanged | both_nan)
     return changed, unchanged
-
-
-# Public functions
 
 
 def init_qc(

@@ -22,8 +22,6 @@ _REQUIRED_CONFIG_SECTIONS = (
     "ctd",
 )
 
-# Helper functions
-
 
 def _ensure_utc(dt: datetime) -> datetime:
     return dt.replace(tzinfo=timezone.utc)
@@ -150,9 +148,6 @@ def _parse_user_config(file: str) -> dict:
         )
 
     return parsed
-
-
-# Public functions
 
 
 def load_config(file: str | None = None) -> dict:

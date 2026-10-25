@@ -6,9 +6,6 @@ import xarray as xr
 _log = logging.getLogger(__name__)
 
 
-# Public functions
-
-
 def concat(file_list: list[str], concat_dim: str = "time") -> xr.Dataset:
     _log.debug("Loading files")
     return xr.open_mfdataset(

@@ -294,8 +294,8 @@ def l3(
         typer.Option(
             "--eps-in",
             "-e",
-            help="netCDF file(s) of depth-binned microstructure from pyturb "
-            "(*.eps-bin.nc). The bin size must match --bin.",
+            help="netCDF file(s) of depth-binned microstructure from pyturb."
+            " The bin size must match --bin.",
         ),
     ] = None,
     config_file: _config_annotation = None,

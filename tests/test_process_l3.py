@@ -28,11 +28,17 @@ def test_eps_bin_size_rejects_uneven_spacing():
         pl3._eps_bin_size(ds)
 
 
-def test_eps_bin_size_rejects_bins_not_starting_at_the_surface():
-    # centres 2, 4, 6 imply a first edge at 1 m; glide bins always start at 0.
-    ds = xr.Dataset(coords=dict(depth=("depth", [2.0, 4.0, 6.0])))
-    with pytest.raises(ValueError, match="do not start at the surface"):
-        pl3._eps_bin_size(ds)
+def test_check_alignment_accepts_a_grid_starting_deeper():
+    pl3._check_alignment(np.array([1.0, 3.0, 5.0]), np.array([5.0, 7.0]), 2.0)
+
+
+def test_check_alignment_tolerates_small_offsets():
+    pl3._check_alignment(np.array([1.0, 3.0]), np.array([1.04, 3.04]), 2.0)
+
+
+def test_check_alignment_rejects_offset_edges():
+    with pytest.raises(ValueError, match="offset by 1 m"):
+        pl3._check_alignment(np.array([1.0, 3.0]), np.array([2.0, 4.0]), 2.0)
 
 
 @pytest.mark.parametrize("bin_size", [1.0, 3.0, 4.0])
@@ -274,6 +280,32 @@ def test_merge_eps_bin_refuses_a_mismatched_grid(slocum_l3_2m, make_eps_bin):
     eps = make_eps_bin(l3, targets=[1], bin_size=4.0)
     with pytest.raises(ValueError, match="binned at 4 m"):
         pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
+
+
+def test_merge_eps_bin_accepts_a_grid_starting_deeper(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1], n_bins=60)
+    eps = eps.assign_coords(depth=eps.depth + 4.0)  # first edge at 4 m
+
+    out = pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
+
+    np.testing.assert_allclose(out.eps.values[2:62, 1], eps.eps.values[0], rtol=1e-6)
+    assert np.isnan(out.eps.values[:2, 1]).all()
+
+
+def test_merge_eps_bin_refuses_offset_bin_edges(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1])
+    eps = eps.assign_coords(depth=eps.depth + 1.0)
+    with pytest.raises(ValueError, match="bin edges do not line up"):
+        pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
+
+
+def test_depth_map_matches_float32_centres():
+    # L3 z is stored as f4, which cannot hold 0.1 m centres exactly.
+    centres = 0.05 + 0.1 * np.arange(10000)
+    eps_idx, _ = pl3._depth_map(centres.astype("f4").astype("f8"), centres)
+    assert eps_idx.size == centres.size
 
 
 def test_shipped_config_declares_the_microstructure_variables():

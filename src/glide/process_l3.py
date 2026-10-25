@@ -11,9 +11,7 @@ from . import qc
 
 _log = logging.getLogger(__name__)
 
-_TOL = 1e-6  # m or s, tolerance for matching bin geometry
-
-# Helper functions
+_TOL = 0.05  # m, tolerance for matching bin geometry
 
 
 def _infer_bin_size(ds: xr.Dataset) -> float:
@@ -37,11 +35,10 @@ def _to_datetime64(values: ArrayLike) -> NDArray:
 
 
 def _eps_bin_size(ds_eps: xr.Dataset) -> float:
-    """Bin width of the microstructure depth grid, validated for alignment.
+    """Bin width of the microstructure depth grid.
 
-    pyturb records no bin width, so it has to come from the coordinate spacing.
-    The grid must be uniform and start at the surface, because glide's L3 bins
-    always do; that is what makes the two grids comparable at all.
+    pyturb records no bin width, so it has to come from the coordinate spacing,
+    which must be uniform.
     """
     depth = np.asarray(ds_eps["depth"].values, dtype="f8")
     if depth.ndim != 1 or depth.size < 2:
@@ -59,15 +56,7 @@ def _eps_bin_size(ds_eps: xr.Dataset) -> float:
             f"{np.unique(np.round(spacing, 6))}); cannot infer a bin width."
         )
 
-    width = float(spacing[0])
-    if abs(depth[0] - width / 2) > _TOL:
-        raise ValueError(
-            f"Microstructure depth bins do not start at the surface: the first "
-            f"centre is {depth[0]:g} m for a {width:g} m bin, implying a first "
-            f"edge at {depth[0] - width / 2:g} m. glide L3 bins always start at "
-            f"0 m, so the two grids cannot be aligned."
-        )
-    return width
+    return float(spacing[0])
 
 
 def _check_bin_size(bin_size: float, eps_bin_size: float) -> None:
@@ -79,6 +68,20 @@ def _check_bin_size(bin_size: float, eps_bin_size: float) -> None:
             f"depth-averaged, so glide will not re-bin them. Re-run 'glide l3' "
             f"with -b {eps_bin_size:g}, or merge into an L3 file that already "
             f"uses {eps_bin_size:g} m bins."
+        )
+
+
+def _check_alignment(
+    l3_centres: NDArray, eps_centres: NDArray, bin_size: float
+) -> None:
+    """Refuse grids whose bin edges are offset; differing depth ranges are fine."""
+    offset = (eps_centres[0] - l3_centres[0]) / bin_size
+    misfit = abs(offset - round(offset)) * bin_size
+    if misfit > _TOL:
+        raise ValueError(
+            f"Microstructure depth bins are offset by {misfit:g} m from the L3 "
+            f"bins (microstructure centre {eps_centres[0]:g} m, L3 centre "
+            f"{l3_centres[0]:g} m), so the bin edges do not line up."
         )
 
 
@@ -225,9 +228,6 @@ def _report_assignment(ds: xr.Dataset, assigned: NDArray, fraction: NDArray) -> 
                 uncovered,
                 int(climbs.sum()),
             )
-
-
-# Public functions
 
 
 def parse_l3(file: str) -> tuple[xr.Dataset, float]:
@@ -394,9 +394,15 @@ def merge_eps_bin(
             "bins with no matching L3 bin will be dropped.",
             bin_size,
         )
-    eps_idx, l3_idx = _depth_map(
-        l3_centres, np.asarray(ds_eps["depth"].values, dtype="f8")
-    )
+    eps_centres = np.asarray(ds_eps["depth"].values, dtype="f8")
+    _check_alignment(l3_centres, eps_centres, bin_size)
+    eps_idx, l3_idx = _depth_map(l3_centres, eps_centres)
+    if eps_idx.size == 0:
+        raise ValueError(
+            f"No microstructure depth bins ({eps_centres.min():g} to "
+            f"{eps_centres.max():g} m) overlap the L3 depth grid "
+            f"({l3_centres.min():g} to {l3_centres.max():g} m)."
+        )
 
     variables = _select_eps_variables(ds, ds_eps, config)
     assigned, _ = _assign_eps_profiles(ds, ds_eps)
