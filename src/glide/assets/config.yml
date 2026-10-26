@@ -223,9 +223,7 @@ merged_variables:
       instrument: instrument_microrider
       observation_type: calculated
 
-  # Microstructure from pyturb (*.eps-bin.nc), placed onto the L3 grid by
-  # `glide l3 --eps-in` or `glide merge <l3> <eps-bin> eps`. The L3 bin size must
-  # match the bin size of the microstructure file.
+  # Microstructure from pyturb
   eps:
     CF:
       long_name: TKE dissipation rate
