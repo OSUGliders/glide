@@ -19,9 +19,6 @@ _FLT_MARKERS = ("sbd", "dbd")
 _SCI_MARKERS = ("tbd", "ebd")
 
 
-# Helper functions
-
-
 def _fix_time_variable_conflict(ds: xr.Dataset) -> xr.Dataset:
     """This fixes conflicting time variable names when parsing a combined flight/science data.
     Generally, they should be parsed separately."""
@@ -205,9 +202,6 @@ def pair_input_files(
         )
 
     return [(flt_by_key[k], sci_by_key[k]) for k in paired_keys]
-
-
-# Public API functions
 
 
 def parse_l1(file: str | xr.Dataset) -> xr.Dataset:

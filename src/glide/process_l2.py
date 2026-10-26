@@ -9,8 +9,6 @@ from numpy.typing import NDArray
 
 _log = logging.getLogger(__name__)
 
-# Helper functions
-
 
 def _contiguous_regions(condition: NDArray) -> NDArray:
     """Finds the indices of contiguous True regions in a boolean array.
@@ -132,9 +130,6 @@ def _interp_velocity_to_profiles(
     ds_binned["u"] = (("profile_id",), u_interp, u_attrs)
     ds_binned["v"] = (("profile_id",), v_interp, v_attrs)
     return ds_binned
-
-
-# Public functions
 
 
 def parse_l2(file: str) -> xr.Dataset:

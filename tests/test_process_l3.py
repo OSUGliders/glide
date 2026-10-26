@@ -1,0 +1,280 @@
+"""Tests for glide.process_l3, the assimilation of external microstructure."""
+
+import numpy as np
+import pytest
+import xarray as xr
+
+import glide.process_l3 as pl3
+import glide.qc as qc
+
+
+def _config(*names):
+    """A config declaring only the named variables as merged_variables."""
+    return dict(merged_variables={n: dict(CF={}) for n in names})
+
+
+# --- geometry and bin size -------------------------------------------------
+
+
+def test_eps_bin_size_rejects_uneven_spacing():
+    ds = xr.Dataset(coords=dict(depth=("depth", [1.0, 3.0, 6.0])))
+    with pytest.raises(ValueError, match="not uniformly spaced"):
+        pl3._eps_bin_size(ds)
+
+
+def test_check_alignment_tolerates_small_offsets():
+    pl3._check_alignment(np.array([1.0, 3.0]), np.array([1.04, 3.04]), 2.0)
+
+
+# --- depth mapping ---------------------------------------------------------
+
+
+def test_depth_map_drops_bins_deeper_than_the_l3_grid():
+    l3 = np.array([1.0, 3.0])
+    eps_idx, l3_idx = pl3._depth_map(l3, np.array([1.0, 3.0, 5.0, 7.0]))
+    np.testing.assert_array_equal(eps_idx, [0, 1])
+    np.testing.assert_array_equal(l3_idx, [0, 1])
+
+
+def test_depth_map_survives_a_gap_in_the_l3_grid():
+    # bin_l2 builds z from the bins that hold data, so a level can be absent.
+    # Everything either side must still land on the right level.
+    l3 = np.array([1.0, 5.0, 7.0])  # the 3 m level is missing
+    eps_idx, l3_idx = pl3._depth_map(l3, np.array([1.0, 3.0, 5.0, 7.0]))
+    np.testing.assert_array_equal(eps_idx, [0, 2, 3])
+    np.testing.assert_array_equal(l3_idx, [0, 1, 2])
+
+
+def test_depth_map_matches_float32_centres():
+    # L3 z is stored as f4, which cannot hold 0.1 m centres exactly.
+    centres = 0.05 + 0.1 * np.arange(10000)
+    eps_idx, _ = pl3._depth_map(centres.astype("f4").astype("f8"), centres)
+    assert eps_idx.size == centres.size
+
+
+# --- time coercion ---------------------------------------------------------
+
+
+def test_to_datetime64_round_trips_both_provenances():
+    # bin_l2 leaves float posix seconds; reading a file back gives datetimes.
+    stamp = np.datetime64("2026-08-24T00:58:47.500", "ns")
+    from_float = pl3._to_datetime64(np.array([stamp.astype("f8") / 1e9]))
+    from_dates = pl3._to_datetime64(np.array([stamp]))
+    assert from_float[0] == from_dates[0] == stamp
+
+
+# --- profile alignment -----------------------------------------------------
+
+
+def test_profile_time_is_not_used_for_alignment(slocum_l3_2m, make_eps_bin):
+    # The fixture puts profile_time in the preceding profile, as the real files
+    # do. Aligning on it would pick a dive; maximum overlap must pick the climb.
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1, 3])
+
+    misleading = (
+        np.searchsorted(
+            l3.profile_time_start.values, eps.profile_time.values, side="right"
+        )
+        - 1
+    )
+    assert l3.state.values[misleading].tolist() == [1, 1], "fixture is not misleading"
+
+    assigned, _ = pl3._assign_eps_profiles(l3, eps)
+    assert l3.state.values[assigned].tolist() == [2, 2]
+
+
+def test_duplicate_claims_keep_the_better_overlap(slocum_l3_2m, make_eps_bin, caplog):
+    l3, _ = slocum_l3_2m
+    full = make_eps_bin(l3, targets=[1])
+    partial = make_eps_bin(l3, targets=[1], coverage=0.5, seed=1)
+    # the partial profile has some bin times outside the window
+    times = partial.time.values.copy()
+    times[0, 0] = l3.profile_time_start.values[0].astype("M8[ns]")
+    partial["time"] = (("profile", "depth"), times)
+    eps = xr.concat([full, partial], dim="profile")
+
+    with caplog.at_level("WARNING"):
+        assigned, _ = pl3._assign_eps_profiles(l3, eps)
+
+    assert assigned.tolist() == [1, -1]
+    assert "claimed by microstructure profiles" in caplog.text
+
+
+def test_non_overlapping_profile_is_skipped_with_a_warning(
+    slocum_l3_2m, make_eps_bin, caplog
+):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1, 3])
+    times = eps.time.values.copy()
+    times[1] = times[1] + np.timedelta64(365, "D")
+    eps["time"] = (("profile", "depth"), times)
+
+    with caplog.at_level("WARNING"):
+        assigned, _ = pl3._assign_eps_profiles(l3, eps)
+
+    assert assigned.tolist() == [1, -1]
+    assert "does not overlap any L3 profile window" in caplog.text
+
+
+def test_wholly_unrelated_file_is_an_error(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1, 3])
+    eps["time"] = (
+        ("profile", "depth"),
+        eps.time.values + np.timedelta64(365, "D"),
+    )
+    with pytest.raises(ValueError, match="different glider or deployment"):
+        pl3._assign_eps_profiles(l3, eps)
+
+
+# --- variable selection ----------------------------------------------------
+
+
+def test_only_declared_variables_are_selected(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1])
+    assert pl3._select_eps_variables(l3, eps, _config("eps", "chi")) == ["eps", "chi"]
+
+
+def test_declaring_a_glide_variable_is_refused(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1])
+    with pytest.raises(ValueError, match="already exists in the L3 dataset"):
+        pl3._select_eps_variables(l3, eps, _config("temperature"))
+
+
+def test_no_declared_variable_present_is_an_error(slocum_l3_2m, make_eps_bin):
+    # The shipped config declares e_1/e_2 for q files; neither is in an eps file.
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1])
+    with pytest.raises(ValueError, match="None of the merged_variables"):
+        pl3._select_eps_variables(l3, eps, _config("e_1", "e_2"))
+
+
+def test_placeholder_units_are_replaced_by_the_config(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1])
+    config = dict(merged_variables=dict(W=dict(CF=dict(units="m s-1"))))
+
+    attrs = pl3._merge_attrs(eps, "W", config)
+
+    assert attrs["units"] == "m s-1"
+
+
+def test_file_attributes_win_over_the_config(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1])
+    config = dict(merged_variables=dict(eps=dict(CF=dict(units="wrong"))))
+
+    attrs = pl3._merge_attrs(eps, "eps", config)
+
+    assert attrs["units"] == "W kg-1"
+
+
+# --- end to end ------------------------------------------------------------
+
+
+def test_merge_eps_bin_places_values_on_the_right_profiles(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1, 3], n_bins=60)
+
+    out = pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
+
+    assert out.eps.dims == ("z", "profile_id")
+    assert out.eps.dtype == np.float32
+    # only the two climbs carry data
+    covered = np.isfinite(out.eps.values).any(axis=0)
+    np.testing.assert_array_equal(covered, [False, True, False, True])
+    # and the values are the source values, on the matching bins
+    np.testing.assert_allclose(out.eps.values[:60, 1], eps.eps.values[0], rtol=1e-6)
+
+
+def test_merge_eps_bin_follows_qc_companions(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1])
+
+    out = pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
+
+    assert out.eps_qc.dtype == np.int8
+    assert out.eps.attrs["ancillary_variables"] == "eps_qc"
+    np.testing.assert_array_equal(out.eps_qc.attrs["flag_values"], [0, 1, 2, 4, 9])
+    # bins no microstructure reached are flagged missing, not unknown
+    assert out.eps_qc.values[:, 0].tolist() == [qc.MISSING] * out.sizes["z"]
+
+
+def test_merge_eps_bin_records_the_source_and_the_instrument(
+    slocum_l3_2m, make_eps_bin
+):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1, 3])
+    eps.encoding["source"] = "somewhere/sl685.eps-bin.nc"
+
+    out = pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
+
+    assert out.attrs["microstructure_source_file"] == "somewhere/sl685.eps-bin.nc"
+    assert out.attrs["microstructure_instrument_sn"] == "435"
+    # and nothing else is added
+    added = {k for k in out.attrs if k.startswith("microstructure")}
+    assert added == {"microstructure_source_file", "microstructure_instrument_sn"}
+
+
+def test_merge_eps_bin_refuses_a_mismatched_grid(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1], bin_size=4.0)
+    with pytest.raises(ValueError, match="binned at 4 m"):
+        pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
+
+
+def test_merge_eps_bin_accepts_a_grid_starting_deeper(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1], n_bins=60)
+    eps = eps.assign_coords(depth=eps.depth + 4.0)  # first edge at 4 m
+
+    out = pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
+
+    np.testing.assert_allclose(out.eps.values[2:62, 1], eps.eps.values[0], rtol=1e-6)
+    assert np.isnan(out.eps.values[:2, 1]).all()
+
+
+def test_merge_eps_bin_refuses_offset_bin_edges(slocum_l3_2m, make_eps_bin):
+    l3, _ = slocum_l3_2m
+    eps = make_eps_bin(l3, targets=[1])
+    eps = eps.assign_coords(depth=eps.depth + 1.0)
+    with pytest.raises(ValueError, match="bin edges do not line up"):
+        pl3.merge_eps_bin(l3.copy(deep=True), eps, 2.0, _config("eps"))
+
+
+# --- bin_q, which shares the depth mapping ---------------------------------
+
+
+def test_bin_q_places_shallow_data_on_the_right_bins(slocum_l3_2m):
+    # A q record covering only the top 20 m of a 750 m grid. groupby_bins returns
+    # one value per populated bin, so a positional write would scatter these
+    # values across the wrong depths.
+    l3, _ = slocum_l3_2m
+    ds = l3.copy(deep=True)
+
+    start = ds.profile_time_start.values[1]
+    end = ds.profile_time_end.values[1]
+    time = np.arange(start, end, np.timedelta64(10, "s"))
+    depth = np.linspace(1.0, 19.0, time.size)
+    pressure = depth / 1.0197  # roughly dbar for these depths
+
+    ds_q = xr.Dataset(
+        data_vars=dict(
+            e_1=("time", np.full(time.size, -8.0)),
+            e_2=("time", np.full(time.size, -9.0)),
+            pressure=("time", pressure),
+        ),
+        coords=dict(time=("time", time)),
+    )
+
+    config = dict(merged_variables=dict(e_1=dict(CF={}), e_2=dict(CF={})))
+    out = pl3.bin_q(ds, ds_q, 2.0, config)
+
+    shallow = out.e_1.values[:10, 1]
+    assert np.all(np.isfinite(shallow))
+    np.testing.assert_allclose(shallow, 1e-8, rtol=1e-6)
+    # nothing may appear below the 20 m the q record covered
+    assert np.all(np.isnan(out.e_1.values[11:, 1]))
